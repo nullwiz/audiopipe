@@ -261,45 +261,44 @@ def transcribe_segment(
     device=None,
 ):
     """Transcribe an audio segment using insanely-fast-whisper CLI"""
-    device_param = get_device(device)
-    
-    # Check for CI environment (GitHub Actions)
+    # Check for CI environment or forced CPU mode
     is_ci = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("AUDIOPIPE_TESTING") == "1"
+    force_cpu = os.environ.get("FORCE_CPU") == "1" or is_ci
     
-    # Force CPU in CI environments
-    if is_ci:
+    # Handle device selection
+    if force_cpu or device == "cpu":
+        print("Forcing CPU for transcription.")
         device_param = "cpu"
-        print("CI environment detected. Forcing CPU for transcription.")
-    # Regular check for CUDA availability
-    elif device_param == "cuda" and not torch.cuda.is_available():
-        device_param = "cpu"
-        print("Warning: CUDA specified but not available. Using CPU instead.")
-    
-    # For insanely-fast-whisper, we need just the device type without index
-    # CPU should be passed as -1 for device-id
-    if device_param == "cpu":
         device_id = "-1"
-    elif device_param == "cuda":
-        device_id = "0"
-    elif device_param == "mps":
-        device_id = "mps"
     else:
-        device_id = "-1"  # Default to CPU
+        # Regular device detection
+        device_param = get_device(device)
+        
+        # Check CUDA availability
+        if device_param == "cuda" and not torch.cuda.is_available():
+            device_param = "cpu"
+            print("Warning: CUDA specified but not available. Using CPU instead.")
+        
+        # For insanely-fast-whisper, set appropriate device_id
+        if device_param == "cpu":
+            device_id = "-1"
+        elif device_param == "cuda":
+            device_id = "0"
+        elif device_param == "mps":
+            device_id = "mps"
+        else:
+            device_id = "-1"  # Default to CPU
     
     print(f"Using device '{device_param}' with device-id '{device_id}' for transcription")
 
+    # Safely build command
     cmd = [
         "insanely-fast-whisper",
-        "--file-name",
-        audio_path,
-        "--transcript-path",
-        output_path,
-        "--model-name",
-        "openai/whisper-large-v3",
-        "--timestamp",
-        "word",
-        "--device-id",
-        device_id,
+        "--file-name", audio_path,
+        "--transcript-path", output_path,
+        "--model-name", "openai/whisper-large-v3",
+        "--timestamp", "word",
+        "--device-id", device_id
     ]
 
     # Only add batch size on GPU

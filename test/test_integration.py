@@ -120,11 +120,12 @@ def test_transcription(setup_test_env):
     if not diarized_json.exists():
         diarized_json = test_diarization(setup_test_env)
 
-    # Run the full pipeline with start-step 3 (transcription only)
+    # Run the full pipeline with start-step 3 (transcription only) and force CPU mode
     result = subprocess.run(
-        ["python", "pipeline.py", str(setup_test_env), "--start-step", "3"],
+        ["python", "pipeline.py", str(setup_test_env), "--start-step", "3", "--device", "cpu"],
         capture_output=True,
         text=True,
+        env={**os.environ, "FORCE_CPU": "1"}  # Force CPU mode in environment
     )
 
     # Check for success
@@ -207,7 +208,7 @@ def test_full_pipeline(setup_test_env):
             if f.is_file():
                 f.unlink()
 
-    # Run the full pipeline
+    # Run the full pipeline with explicit CPU device
     result = subprocess.run(
         [
             "python",
@@ -217,9 +218,12 @@ def test_full_pipeline(setup_test_env):
             "2",
             "--language",
             "en",
+            "--device",
+            "cpu",
         ],
         capture_output=True,
         text=True,
+        env={**os.environ, "FORCE_CPU": "1"}  # Force CPU mode in environment
     )
 
     # Check for success
