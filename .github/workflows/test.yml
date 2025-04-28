@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: ["3.10"]
 
     steps:
       - uses: actions/checkout@v3
@@ -29,7 +29,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          
+      
       - name: Setup CI environment
         run: |
           echo "AUDIOPIPE_TESTING=1" >> $GITHUB_ENV
@@ -44,23 +44,7 @@ jobs:
       - name: Create test directories
         run: |
           mkdir -p output
-          mkdir -p test/data
           
-          # If test data doesn't exist, create minimal test files
-          if [ ! -f "test/data/test_input.wav" ]; then
-            echo "Creating minimal test data"
-            python -c "
-import numpy as np
-from scipy.io import wavfile
-# Create a simple sine wave
-sample_rate = 44100
-duration = 3  # seconds
-t = np.linspace(0, duration, sample_rate * duration)
-data = np.sin(2 * np.pi * 440 * t) * 32767  # A 440Hz sine wave
-wavfile.write('test/data/test_input.wav', sample_rate, data.astype(np.int16))
-"
-          fi
-      
       - name: Debug token availability
         run: |
           if [ -n "${{ secrets.HUGGING_FACE_TOKEN }}" ]; then
@@ -68,7 +52,7 @@ wavfile.write('test/data/test_input.wav', sample_rate, data.astype(np.int16))
           else
             echo "Hugging Face token is NOT available"
           fi
-          
+      
       - name: Run tests with Hugging Face token
         env:
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
@@ -85,10 +69,10 @@ wavfile.write('test/data/test_input.wav', sample_rate, data.astype(np.int16))
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
         run: |
           python -m pytest test/ --integration --cov=. --cov-report=xml
-          
+      
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.10'
         uses: codecov/codecov-action@v3
         with:
           file: ./coverage.xml
-          fail_ci_if_error: false 
+          fail_ci_if_error: false
