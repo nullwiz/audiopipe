@@ -260,5 +260,6 @@ pytest test_pipeline.py -v -k "not slow"
 # Run full pipeline tests (slow)
 pytest test_pipeline.py -v -k "slow" --runslow
 
-For more details on testing, check [README.test.md](README.test.md).
 ```
+
+For more details on Testing, check [README.test.md](README.test.md).
