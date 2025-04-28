@@ -1,6 +1,5 @@
 import os
 import subprocess
-import sys
 import argparse
 import shutil
 import glob
@@ -20,24 +19,41 @@ STEM = "vocals"
 def get_device(device=None):
     """Determine the appropriate device to use"""
     if device:
-        if device == 'cpu':
-            return 'cpu'
-        elif device == 'cuda' and torch.cuda.is_available():
-            return 'cuda'
-        elif device == 'mps' and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return 'mps'
-    
+        if device == "cpu":
+            return "cpu"
+        elif device == "cuda" and torch.cuda.is_available():
+            return "cuda"
+        elif (
+            device == "mps"
+            and hasattr(torch.backends, "mps")
+            and torch.backends.mps.is_available()
+        ):
+            return "mps"
+
     if torch.cuda.is_available():
-        return 'cuda'
-    elif platform.system() == 'Darwin' and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        return 'mps'
+        return "cuda"
+    elif (
+        platform.system() == "Darwin"
+        and hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+    ):
+        return "mps"
     else:
-        return 'cpu'
+        return "cpu"
 
 
 def run_demucs_on_chunk(chunk_path, device=None):
     device_arg = get_device(device)
-    command = ["demucs", "-n", MODEL, "--two-stems", STEM, "--device", device_arg, chunk_path]
+    command = [
+        "demucs",
+        "-n",
+        MODEL,
+        "--two-stems",
+        STEM,
+        "--device",
+        device_arg,
+        chunk_path,
+    ]
     print(f"🔊 Processing chunk: {chunk_path} (using {device_arg})")
     subprocess.run(command, check=True)
 
@@ -81,7 +97,7 @@ def recombine_stems(stem_path_pattern, output_path):
             print(f"❌ Output file too small: {output_path}")
         else:
             print(f"✅ Exported (via ffmpeg): {output_path} ({size} bytes)")
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         print("⚠️ ffmpeg concat failed, falling back to pydub...")
         combine_with_pydub(parts, output_path)
 
@@ -112,33 +128,39 @@ def combine_with_pydub(parts, output_path):
 def process_input_file(input_file, device=None):
     """Process a single input file"""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
+
     if os.path.exists(SEPARATED_DIR):
         shutil.rmtree(SEPARATED_DIR)
-    
+
     run_demucs_on_chunk(input_file, device)
-    
+
     track_folder = os.path.join(SEPARATED_DIR, MODEL)
-    
+
     recombine_stems(
         os.path.join(track_folder, "*", "vocals.wav"),
         os.path.join(OUTPUT_DIR, "combined_vocals.wav"),
     )
-    
+
     recombine_stems(
         os.path.join(track_folder, "*", "no_vocals.wav"),
         os.path.join(OUTPUT_DIR, "combined_background.wav"),
     )
-    
+
     print("✅ Done! Separated and recombined audio saved in:", OUTPUT_DIR)
     return os.path.join(OUTPUT_DIR, "combined_vocals.wav")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Separate vocals from background music")
+    parser = argparse.ArgumentParser(
+        description="Separate vocals from background music"
+    )
     parser.add_argument("input_file", help="Path to input audio file")
-    parser.add_argument("--device", "-d", choices=["cpu", "cuda", "mps"], 
-                      help="Device to use for processing (auto-detected if not specified)")
+    parser.add_argument(
+        "--device",
+        "-d",
+        choices=["cpu", "cuda", "mps"],
+        help="Device to use for processing (auto-detected if not specified)",
+    )
     args = parser.parse_args()
-    
+
     process_input_file(args.input_file, args.device)
