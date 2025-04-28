@@ -1,0 +1,66 @@
+# Output directories and files
+output/*
+!output/.gitkeep
+separated/
+*_diarized.json
+final_transcription*.json
+combine_list.txt
+
+# Logs
+*.log
+pipeline.log
+
+# Temporary audio files
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+chunks/
+
+# But keep test audio files
+!test/data/*.wav
+!test/data/*.mp3
+
+# Python stuff
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+.env/
+
+# Editor/IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db 

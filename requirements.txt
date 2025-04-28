@@ -1,0 +1,14 @@
+torch>=2.0.0
+torchaudio>=2.0.0
+pyannote.audio>=2.1.1
+insanely-fast-whisper>=0.0.9
+pydub>=0.25.1
+demucs>=4.0.0
+numpy>=1.22.0
+tqdm>=4.64.0
+pyannote.core>=4.5
+dataclasses-json>=0.5.7
+soundfile>=0.12.1
+pytest>=7.0.0
+pytest-cov>=4.0.0
+edge-tts>=6.1.0 
