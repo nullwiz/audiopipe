@@ -3,6 +3,7 @@ from pyannote.audio import Pipeline
 import json
 import os
 import argparse
+import sys
 
 # --- Config
 # Try to get token from environment variable, otherwise use a default message
@@ -29,36 +30,51 @@ def diarize_audio(audio_path, num_speakers=None, min_speakers=None, max_speakers
         min_speakers: Minimum number of speakers
         max_speakers: Maximum number of speakers
     """
-    # Initialize pipeline and move to GPU
-    pipeline = Pipeline.from_pretrained(PIPELINE, use_auth_token=HUGGING_FACE_TOKEN)
-    pipeline.to(DEVICE)
+    # Print detailed debug info
+    print(f"Debug: Using token: {'Available' if HUGGING_FACE_TOKEN else 'NOT AVAILABLE'}")
+    if HUGGING_FACE_TOKEN:
+        masked_token = HUGGING_FACE_TOKEN[:4] + "..." + HUGGING_FACE_TOKEN[-4:] if len(HUGGING_FACE_TOKEN) > 8 else "***"
+        print(f"Debug: Token value: {masked_token}")
+    
+    try:
+        # Initialize pipeline and move to GPU
+        pipeline = Pipeline.from_pretrained(PIPELINE, use_auth_token=HUGGING_FACE_TOKEN)
+        pipeline.to(DEVICE)
 
-    # Enable TF32 for better performance
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
+        # Enable TF32 for better performance
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
 
-    # Prepare diarization kwargs
-    kwargs = {}
-    if num_speakers is not None:
-        kwargs["num_speakers"] = num_speakers
-    if min_speakers is not None:
-        kwargs["min_speakers"] = min_speakers
-    if max_speakers is not None:
-        kwargs["max_speakers"] = max_speakers
+        # Prepare diarization kwargs
+        kwargs = {}
+        if num_speakers is not None:
+            kwargs["num_speakers"] = num_speakers
+        if min_speakers is not None:
+            kwargs["min_speakers"] = min_speakers
+        if max_speakers is not None:
+            kwargs["max_speakers"] = max_speakers
 
-    print("⏳ Processing audio...")
+        print("⏳ Processing audio...")
 
-    # Run diarization
-    diarization = pipeline(audio_path, **kwargs)
+        # Run diarization
+        diarization = pipeline(audio_path, **kwargs)
 
-    print("✨ Converting segments...")
+        print("✨ Converting segments...")
 
-    # Convert to list of segments
-    segments = []
-    for turn, _, speaker in diarization.itertracks(yield_label=True):
-        segments.append({"speaker": speaker, "start": turn.start, "end": turn.end})
+        # Convert to list of segments
+        segments = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            segments.append({"speaker": speaker, "start": turn.start, "end": turn.end})
 
-    return segments
+        return segments
+    except Exception as e:
+        print(f"Error in diarize_audio: {str(e)}", file=sys.stderr)
+        # Print additional information for debugging
+        print(f"Python version: {sys.version}", file=sys.stderr)
+        print(f"PyTorch version: {torch.__version__}", file=sys.stderr)
+        print(f"Device: {DEVICE}", file=sys.stderr)
+        print(f"Audio path: {audio_path}", file=sys.stderr)
+        raise
 
 
 def combine_diarization_with_transcription(diarization_segments, transcription_chunks):

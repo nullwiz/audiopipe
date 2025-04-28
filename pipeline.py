@@ -262,7 +262,24 @@ def transcribe_segment(
 ):
     """Transcribe an audio segment using insanely-fast-whisper CLI"""
     device_param = get_device(device)
-    device_id = "0" if device_param == "cuda" else device_param
+    
+    # Fix for GitHub Actions environment or any CI without CUDA
+    if device_param == "cuda" and not torch.cuda.is_available():
+        device_param = "cpu"
+        print("Warning: CUDA specified but not available. Using CPU instead.")
+    
+    # For insanely-fast-whisper, we need just the device type without index
+    # CPU should be passed as -1 for device-id
+    if device_param == "cpu":
+        device_id = "-1"
+    elif device_param == "cuda":
+        device_id = "0"
+    elif device_param == "mps":
+        device_id = "mps"
+    else:
+        device_id = "-1"  # Default to CPU
+    
+    print(f"Using device '{device_param}' with device-id '{device_id}' for transcription")
 
     cmd = [
         "insanely-fast-whisper",

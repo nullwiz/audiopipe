@@ -38,40 +38,39 @@ brew install ffmpeg
 ## Usage
 
 ```bash
-# Basic usage
+# Basic usage - runs all steps in sequence
 python pipeline.py input.mp3
 
-# Specify number of speakers
-python pipeline.py input.mp3 --num-speakers 3
+# Resume from a specific step:
+python pipeline.py input.mp3 --start-step 2  # Skip separation, start from diarization
+python pipeline.py input.mp3 --start-step 3  # Skip to transcription step
 
-# Specify language (improves transcription accuracy)
-python pipeline.py input.mp3 --language es
-
-# Start from a specific step
-python pipeline.py input.mp3 --start-step 2  # Skip audio separation
-
-# Process the transcript output
-python process_transcript.py
-
+# Optional parameters:
+python pipeline.py input.mp3 --num-speakers 3 --language en
 ```
 
-## Pipeline Workflow
+## Pipeline Steps
 
-1. **Audio Source Separation** (`dem.py`)
-   - Separates vocals from background music/noise
-   - Creates `output/combined_vocals.wav` and `output/combined_background.wav`
+The process consists of three main steps that can be run together or separately:
 
-2. **Speaker Diarization** (`diarize.py`)
-   - Identifies different speakers in the audio
-   - Creates `output/combined_vocals_diarized.json`
+1. **Separation** (Step 1): Extracts vocals from background using Demucs
+   - Input: Any audio/video file
+   - Output: `output/combined_vocals.wav`
+   - Note: Files under 60MB are processed as a single unit; larger files are chunked automatically
 
-3. **Transcription** (`pipeline.py`)
-   - Transcribes each speaker's segments
-   - Combines all transcriptions into `output/final_transcription.json`
+2. **Diarization** (Step 2): Identifies different speakers
+   - Input: `output/combined_vocals.wav`
+   - Output: `output/combined_vocals_diarized.json`
+   - Tip: Use `--num-speakers` for better results when speaker count is known
 
-4. **Post-processing** (`process_transcript.py`)
-   - Consolidates consecutive segments from the same speaker
-   - Creates `output/final_transcription_consolidated.json`
+3. **Transcription** (Step 3): Converts speech to text with timestamps
+   - Input: `output/combined_vocals.wav` and diarization data
+   - Output: `output/final_transcription.json`
+   - Tip: Specify `--language` code for improved accuracy
+
+4. **Post-processing** (Optional): Combines consecutive segments from the same speaker
+   - Run separately: `python process_transcript.py`
+   - Output: `output/final_transcription_consolidated.json`
 
 ## Output Files Explained
 
@@ -134,6 +133,26 @@ The presence of these files allows the pipeline to resume from different steps:
 - If `combined_vocals.wav` exists, audio separation can be skipped (step 1)
 - If `combined_vocals_diarized.json` exists, diarization can be skipped (step 2)
 - If only post-processing is needed, run `process_transcript.py` directly
+
+## Visualization Tools
+
+AudioPipe includes tools to visualize your transcripts and generate interactive reports:
+
+```bash
+# Generate timeline visualization for consolidated transcript (recommended)
+python visualize.py transcript output/final_transcription_consolidated.json
+
+# Generate interactive HTML report with audio playback
+python visualize.py report output/final_transcription_consolidated.json --audio output/combined_vocals.wav
+
+# Visualize raw diarization (speaker timeline)
+python visualize.py diarization output/combined_vocals_diarized.json
+```
+
+For best results:
+1. **Always use consolidated transcripts** for visualization (less Y-axis overflow)
+2. Use the HTML report for interactive exploration of longer content
+3. For very long audio (>30min), consider breaking it into smaller chunks before processing
 
 ## Supported File Formats
 
@@ -241,27 +260,38 @@ The final output is a JSON file with the following structure:
 
 ## Troubleshooting
 
-- **CUDA Out of Memory**: The pipeline processes audio in chunks, but you may need to reduce chunk size for very large files
-- **Transcription Accuracy**: Specify the language with `--language` for better results
-- **Speaker Confusion**: If speakers are not correctly identified, try setting `--num-speakers`
-- **Audio quality**: Make sure the audio is clear and speakers do not speak too much on top of each other
+- **Audio Processing**: 
+  - Files under 60MB are processed as a single unit for better quality
+  - Larger files are automatically chunked for memory efficiency
+  - If you get memory errors, try using `--device cpu` which uses less memory
+  
+- **Transcription Accuracy**:
+  - Specify the language with `--language` for better results
+  - Improved accuracy for clear audio with minimal background noise
+  
+- **Speaker Identification**:
+  - If speakers are not correctly identified, try setting `--num-speakers`
+  - Better results when speakers have distinct voices and don't talk over each other
+  
+- **Visualization Overflow**:
+  - For very long transcripts, use the consolidated JSON file for visualization
+  - Run `python process_transcript.py` before generating visualizations
 
 ## Testing
 
-The project includes a comprehensive test suite with pytest:
+The project includes a test suite for validating the pipeline functionality:
 
 ```bash
-# Install test dependencies
-pip install pytest pytest-cov edge-tts
-
-# Run integration tests
+# Run basic integration tests
 python -m pytest test/test_integration.py -v --integration
 
-# Run full pipeline test (slow)
+# Run full pipeline test (slower)
 python -m pytest test/test_integration.py::test_full_pipeline -v --integration --runslow
-
-# Run with coverage
-python -m pytest test/ -v --integration --cov=. --cov-report=html
 ```
+
+### Test Options
+
+- **Full Pipeline Test**: Use `--runslow` to run the complete pipeline test
+- **Hugging Face Token**: For full testing, provide your token with `--hf-token` or set the `HUGGING_FACE_TOKEN` environment variable
 
 For more details on Testing, check [README.test.md](README.test.md).

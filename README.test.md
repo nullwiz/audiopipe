@@ -51,23 +51,14 @@ The test data in `test/data/` includes:
 - `speaker2.wav` - Sample audio from a female voice
 - `test_input.wav` - Combined audio for testing the full pipeline
 
-## Troubleshooting
+## Troubleshooting Tests
 
-1. **Missing Dependencies**:
-   - Ensure you've installed all required packages with `pip install -r requirements.txt`
-   - For testing, also run `pip install pytest pytest-cov edge-tts`
+Here are some common issues you might encounter with tests:
 
-2. **Edge-TTS Issues**:
-   - If edge-tts fails, the tests will create mock audio files
-   - For best results, ensure edge-tts is properly installed
-
-3. **CUDA/GPU Issues**:
-   - The tests can run on CPU if GPU is not available
-   - Set environment variables as needed: `export PYTORCH_ENABLE_MPS_FALLBACK=1`
-
-4. **Audio Processing Failures**:
-   - Ensure FFmpeg is properly installed: `sudo apt-get install ffmpeg`
-   - Check output files in the `output/` directory for debugging
+- **Missing token**: If the `HUGGING_FACE_TOKEN` is not available, the diarization tests will be skipped
+- If ffmpeg is not installed, audio processing tests will fail
+- Set environment variables as needed: `export PYTORCH_ENABLE_MPS_FALLBACK=1`
+- The transcription step is the most resource-intensive and may fail on limited hardware
 
 ## Continuous Integration
 

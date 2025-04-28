@@ -29,6 +29,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+          
+      - name: Setup CI environment
+        run: |
+          echo "AUDIOPIPE_TESTING=1" >> $GITHUB_ENV
+          echo "# This is a testing environment without GPU" > test/CI_ENVIRONMENT
 
       - name: Install dependencies
         run: |
@@ -39,6 +44,22 @@ jobs:
       - name: Create test directories
         run: |
           mkdir -p output
+          mkdir -p test/data
+          
+          # If test data doesn't exist, create minimal test files
+          if [ ! -f "test/data/test_input.wav" ]; then
+            echo "Creating minimal test data"
+            python -c "
+import numpy as np
+from scipy.io import wavfile
+# Create a simple sine wave
+sample_rate = 44100
+duration = 3  # seconds
+t = np.linspace(0, duration, sample_rate * duration)
+data = np.sin(2 * np.pi * 440 * t) * 32767  # A 440Hz sine wave
+wavfile.write('test/data/test_input.wav', sample_rate, data.astype(np.int16))
+"
+          fi
       
       - name: Debug token availability
         run: |
@@ -53,7 +74,10 @@ jobs:
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
         run: |
           echo "HUGGING_FACE_TOKEN is set: $(if [ -n \"$HUGGING_FACE_TOKEN\" ]; then echo 'yes'; else echo 'no'; fi)"
-          python -m pytest test/test_integration.py -v --integration
+          python -m pytest test/test_integration.py::test_audio_separation -v --integration
+          python -m pytest test/test_integration.py::test_diarization -v --integration
+          python -m pytest test/test_integration.py::test_transcription -v --integration
+          python -m pytest test/test_integration.py::test_consolidation -v --integration
 
       - name: Generate coverage report
         if: matrix.python-version == '3.10'

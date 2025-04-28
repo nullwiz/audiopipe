@@ -73,6 +73,12 @@ def test_diarization(setup_test_env):
     if not vocals_path.exists():
         vocals_path = test_audio_separation(setup_test_env)
 
+    # Print debug info
+    token = os.environ.get("HUGGING_FACE_TOKEN")
+    print(f"HUGGING_FACE_TOKEN is {'set' if token else 'NOT SET'}")
+    if token:
+        print(f"Token starts with: {token[:4]}...")
+
     # Run diarization with 2 speakers
     result = subprocess.run(
         ["python", "diarize.py", str(vocals_path), "--num-speakers", "2"],
@@ -80,7 +86,11 @@ def test_diarization(setup_test_env):
         text=True,
     )
 
-    # Check for success
+    # Check for success - print the full output if it fails
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout)
+        print("STDERR:", result.stderr)
+        
     assert result.returncode == 0, f"Diarization failed: {result.stderr}"
 
     # Check output file exists
@@ -119,7 +129,7 @@ def test_transcription(setup_test_env):
 
     # Check for success
     assert result.returncode == 0, f"Transcription failed: {result.stderr}"
-
+    
     # Check output file exists
     transcript_json = Path("output/final_transcription.json")
     assert transcript_json.exists(), "Transcription JSON not created"

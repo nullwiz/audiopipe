@@ -14,6 +14,7 @@ OUTPUT_DIR = "output"
 SEPARATED_DIR = os.path.join("separated")
 MODEL = "htdemucs"
 STEM = "vocals"
+MAX_FILE_SIZE_MB = 60  # Maximum file size to process as a single unit
 
 
 def get_device(device=None):
@@ -131,8 +132,17 @@ def process_input_file(input_file, device=None):
 
     if os.path.exists(SEPARATED_DIR):
         shutil.rmtree(SEPARATED_DIR)
-
-    run_demucs_on_chunk(input_file, device)
+        
+    # Check file size
+    file_size_mb = os.path.getsize(input_file) / (1024 * 1024)
+    if file_size_mb <= MAX_FILE_SIZE_MB:
+        print(f"🔍 File is under {MAX_FILE_SIZE_MB}MB ({file_size_mb:.1f}MB), processing as a single unit")
+        run_demucs_on_chunk(input_file, device)
+    else:
+        print(f"🔍 File is over {MAX_FILE_SIZE_MB}MB ({file_size_mb:.1f}MB), would normally chunk the file")
+        # For now, we're still processing as a single unit since chunking is handled in the pipeline
+        # Future enhancement: implement chunking here
+        run_demucs_on_chunk(input_file, device)
 
     track_folder = os.path.join(SEPARATED_DIR, MODEL)
 

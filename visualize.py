@@ -204,6 +204,14 @@ def plot_transcript(transcript_json_path: str, output_path: Optional[str] = None
         print(f"No segments found in {transcript_json_path}")
         return None
     
+    # Check if this is likely a non-consolidated transcript with many segments
+    if not consolidated and len(segments) > 100:
+        print("WARNING: This appears to be a non-consolidated transcript with many segments.")
+        print("For better visualization with less Y-axis overflow, use the consolidated transcript:")
+        print("1. Run: python process_transcript.py")
+        print("2. Visualize: python visualize.py transcript output/final_transcription_consolidated.json")
+        print("Continuing with current file, but visualization may be very large...")
+    
     # Get time range
     min_time = min(segment['start'] for segment in segments)
     max_time = max(segment['end'] for segment in segments)
@@ -213,9 +221,20 @@ def plot_transcript(transcript_json_path: str, output_path: Optional[str] = None
     colors = create_color_palette(len(speakers))
     color_map = {speaker: color for speaker, color in zip(speakers, colors)}
     
-    # Calculate figure size - make it more compact
-    fig_width = min(14, max(10, duration / 10))  # Adjust width based on duration
-    fig_height = min(20, max(6, len(segments) * 0.2))  # More compact height
+    # Calculate figure size - make it more compact for non-consolidated transcripts
+    if consolidated:
+        # For consolidated transcripts, use a reasonable size
+        fig_width = min(14, max(10, duration / 10))  # Adjust width based on duration
+        fig_height = min(20, max(6, len(segments) * 0.3))  # Reasonable height
+    else:
+        # For non-consolidated (raw) transcripts with many segments, use a more compact layout
+        fig_width = min(14, max(10, duration / 15))  # Slightly narrower
+        fig_height = min(40, max(8, len(segments) * 0.15))  # Much more compact height per segment
+        # If we have too many segments, cap the height and warn
+        if len(segments) > 300:
+            fig_height = 40  # Maximum reasonable height
+            print(f"WARNING: Large number of segments ({len(segments)}). Capping visualization height.")
+            print("Consider using the consolidated transcript for better visualization.")
     
     # Create plot
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
@@ -237,7 +256,9 @@ def plot_transcript(transcript_json_path: str, output_path: Optional[str] = None
     
     # Plot segments with text more compactly
     y_pos = fig_height - 1  # Start closer to the top
-    segment_spacing = 0.7    # Reduce spacing between segments
+    
+    # Adjust segment spacing based on consolidated or not
+    segment_spacing = 0.8 if consolidated else 0.4  # Much tighter spacing for raw transcripts
     
     for i, segment in enumerate(segments):
         speaker = segment['speaker']
@@ -866,11 +887,30 @@ def main():
         print(f"Diarization plot saved to: {output_path}")
     
     elif args.command == "transcript":
+        # Check if a consolidated version exists that would be better for visualization
+        if not args.consolidated and "consolidated" not in args.json_path:
+            consolidated_path = args.json_path.replace(".json", "_consolidated.json")
+            if os.path.exists(consolidated_path):
+                print(f"TIP: A consolidated transcript was found at: {consolidated_path}")
+                print("     For better visualization with less overflow, consider using it instead.")
+                print(f"     Command: python visualize.py transcript {consolidated_path}")
+                print("     Continuing with requested file...")
+        
         output_path = plot_transcript(args.json_path, args.output, 
                                      args.consolidated, args.highlight)
         print(f"Transcript plot saved to: {output_path}")
     
     elif args.command == "report":
+        # Check if a consolidated version exists that would be better for visualization
+        if "consolidated" not in args.transcript_path:
+            consolidated_path = args.transcript_path.replace(".json", "_consolidated.json")
+            if os.path.exists(consolidated_path):
+                print(f"TIP: A consolidated transcript was found at: {consolidated_path}")
+                print("     For better report visualization, consider using it instead.")
+                print(f"     Command: python visualize.py report {consolidated_path}" + 
+                     (f" --audio {args.audio}" if args.audio else ""))
+                print("     Continuing with requested file...")
+        
         output_path = generate_html_report(args.transcript_path, args.audio, 
                                           args.diarization, args.output)
         print(f"HTML report saved to: {output_path}")
