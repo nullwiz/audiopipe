@@ -248,18 +248,20 @@ The final output is a JSON file with the following structure:
 
 ## Testing
 
-The project includes a comprehensive test suite built with pytest:
+The project includes a comprehensive test suite with pytest:
 
 ```bash
 # Install test dependencies
 pip install pytest pytest-cov edge-tts
 
-# Run basic tests
-pytest test_pipeline.py -v -k "not slow" 
+# Run integration tests
+python -m pytest test/test_integration.py -v --integration
 
-# Run full pipeline tests (slow)
-pytest test_pipeline.py -v -k "slow" --runslow
+# Run full pipeline test (slow)
+python -m pytest test/test_integration.py::test_full_pipeline -v --integration --runslow
 
+# Run with coverage
+python -m pytest test/ -v --integration --cov=. --cov-report=html
 ```
 
 For more details on Testing, check [README.test.md](README.test.md).

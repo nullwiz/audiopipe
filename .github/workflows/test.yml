@@ -31,11 +31,11 @@ jobs:
         pip install pytest pytest-cov
         pip install edge-tts
     
-    - name: Run basic tests
+    - name: Run integration tests
       run: |
-        pytest test_pipeline.py -v -k "not slow"
+        pytest test/test_integration.py -v --integration
     
-    - name: Run slow tests
+    - name: Run full pipeline test
       run: |
-        pytest test_pipeline.py -v -k "slow" --runxfail
+        pytest test/test_integration.py::test_full_pipeline -v --integration --runslow
       continue-on-error: true  # Allow slow tests to fail without failing the build 

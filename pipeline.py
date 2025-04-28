@@ -17,54 +17,68 @@ class RetroDisplay:
         self.last_log = ""
         self.initialized = False
         self.num_lines = 0
-
+        self.update_count = 0
+        
+    def _clear_lines(self, num_lines):
+        """Clear the specified number of lines from the console"""
+        if num_lines <= 0:
+            return
+        
+        # Move cursor up and clear lines
+        sys.stdout.write(f"\033[{num_lines}F")
+        for _ in range(num_lines):
+            sys.stdout.write("\033[K\n")
+        sys.stdout.write(f"\033[{num_lines}F")
+        
     def update_progress(self, line):
         if not self.initialized:
-            print("\n\n")
+            print("\n\n")  # Create initial space for our display
             self.initialized = True
             self.num_lines = 2
-
+            
+        # Only update if the line changed to avoid flickering
         if line != self.progress_line:
             self.progress_line = line
             self._refresh()
-
+            
     def update_log(self, line):
         if not self.initialized:
-            print("\n\n")
+            print("\n\n")  # Create initial space
             self.initialized = True
             self.num_lines = 2
-
+            
+        # Only update if it's a new log message to avoid duplicates
         if line and line != self.last_log:
             self.log_line = line
             self.last_log = line
             self._refresh()
-
+            
     def _refresh(self):
+        """Refresh the display by clearing and redrawing lines"""
         if not (self.progress_line or self.log_line):
             return
-
-        progress_lines = (
-            (len(self.progress_line) // 100) + 1 if self.progress_line else 0
-        )
-        log_lines = (len(self.log_line) // 100) + 1 if self.log_line else 0
+        
+        # Calculate lines needed for display
+        progress_lines = self.progress_line.count('\n') + 1 if self.progress_line else 0
+        log_lines = self.log_line.count('\n') + 1 if self.log_line else 0
         total_lines = progress_lines + log_lines
-
-        if self.num_lines > 0:
-            sys.stdout.write(f"\033[{self.num_lines}F")
-            for _ in range(self.num_lines):
-                sys.stdout.write("\033[K\n")
-            sys.stdout.write(f"\033[{self.num_lines}F")
-
+        
+        # Clear previous display
+        self._clear_lines(self.num_lines)
+        
+        # Draw new content
         if self.progress_line:
-            for i in range(0, len(self.progress_line), 100):
-                print(self.progress_line[i : i + 100])
-
+            print(self.progress_line)
+        
         if self.log_line:
-            for i in range(0, len(self.log_line), 100):
-                print(self.log_line[i : i + 100])
-
+            print(self.log_line)
+            
+        # Update line count
         self.num_lines = total_lines
         sys.stdout.flush()
+        
+        # Increment update counter (useful for debugging)
+        self.update_count += 1
 
 
 display = RetroDisplay()
@@ -128,6 +142,7 @@ def run_command_with_progress(cmd, desc, expected_steps=None):
     last_update = start_time
     stderr_output = []
 
+    # Patterns to filter out spam
     skip_patterns = [
         "configuration:",
         "Voila!",
@@ -144,6 +159,9 @@ def run_command_with_progress(cmd, desc, expected_steps=None):
         "Loading",
         "Initializing",
     ]
+
+    # Track seen messages to avoid duplicates
+    seen_messages = set()
 
     while True:
         reads = [process.stdout, process.stderr]
@@ -173,8 +191,11 @@ def run_command_with_progress(cmd, desc, expected_steps=None):
             if output:
                 output = output.strip()
 
-                if any(pattern in output for pattern in skip_patterns):
+                # Skip duplicate messages and filtered messages
+                if output in seen_messages or any(pattern in output for pattern in skip_patterns):
                     continue
+                
+                seen_messages.add(output)
 
                 if stream == process.stderr:
                     logging.warning(output)
@@ -387,32 +408,47 @@ def process_speaker_segments(
                 )
 
                 for trans in transcription:
-                    trans_start = float(trans["start"])
-                    trans_end = float(trans["end"])
+                    # Ensure we have valid float values
+                    trans_start = float(trans["start"]) if trans["start"] is not None else 0.0
+                    trans_end = float(trans["end"]) if trans["end"] is not None else 0.0
+                    
+                    if trans_start >= trans_end:
+                        logging.warning(f"Skipping invalid segment: start={trans_start}, end={trans_end}")
+                        continue
 
                     for offset in segment_offsets:
+                        # Calculate segment boundaries
+                        offset_end = offset["concat_start"] + offset["duration"]
+                        
                         if (
                             trans_start >= offset["concat_start"]
-                            and trans_start
-                            < offset["concat_start"] + offset["duration"]
+                            and trans_start < offset_end
                         ):
-                            orig_start = offset["orig_start"] + (
-                                trans_start - offset["concat_start"]
-                            )
-                            orig_end = min(
-                                offset["orig_start"] + offset["duration"],
-                                offset["orig_start"]
-                                + (trans_end - offset["concat_start"]),
-                            )
-
-                            all_transcriptions.append(
-                                {
-                                    "speaker": speaker,
-                                    "text": trans["text"],
-                                    "start": orig_start,
-                                    "end": orig_end,
-                                }
-                            )
+                            # Calculate adjusted timestamps with proper type checking
+                            try:
+                                orig_start = offset["orig_start"] + (trans_start - offset["concat_start"])
+                                
+                                # Handle potential None or invalid values
+                                orig_end = min(
+                                    offset["orig_start"] + offset["duration"],
+                                    offset["orig_start"] + (trans_end - offset["concat_start"])
+                                )
+                                
+                                # Ensure we have valid values
+                                if orig_end <= orig_start:
+                                    logging.warning(f"Invalid segment timing: start={orig_start}, end={orig_end}")
+                                    continue
+                                
+                                all_transcriptions.append(
+                                    {
+                                        "speaker": speaker,
+                                        "text": trans["text"],
+                                        "start": orig_start,
+                                        "end": orig_end,
+                                    }
+                                )
+                            except (TypeError, ValueError) as e:
+                                logging.error(f"Error processing segment: {e}, segment: {trans}, offset: {offset}")
                             break
 
             except Exception as e:

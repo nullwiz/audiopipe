@@ -14,11 +14,13 @@ audiopipe/
 ├── dem.py                  # Audio separation module
 ├── diarize.py              # Speaker diarization module
 ├── process_transcript.py   # Post-processing for consolidation
-├── test_pipeline.py        # Test suite
+├── test/                   # Test directory
+│   ├── test_integration.py # Integration tests
+│   └── data/               # Test data files
 ├── conftest.py             # Pytest configuration
 ├── requirements.txt        # Python dependencies
 ├── README.md               # Project documentation
-├── TESTING.md              # Testing documentation
+├── README.test.md          # Testing documentation
 ├── CONTRIBUTING.md         # Contribution guidelines
 ├── .gitignore              # Git ignore patterns
 └── output/                 # Output directory (only .gitkeep is committed)
@@ -49,11 +51,11 @@ audiopipe/
 Before submitting a pull request, please run the test suite:
 
 ```bash
-# Run basic tests
-pytest test_pipeline.py -v -k "not slow"
+# Run integration tests
+python -m pytest test/test_integration.py -v --integration
 
 # Run all tests including slow ones (if you have time)
-pytest test_pipeline.py -v --runslow
+python -m pytest test/test_integration.py -v --integration --runslow
 ```
 
 ## Environment Variables

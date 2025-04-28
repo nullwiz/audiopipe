@@ -4,13 +4,9 @@ This document provides comprehensive guidance on testing the AudioPipe project.
 
 ## Test Structure
 
-The project uses pytest and includes both unit tests and integration tests:
+The project uses pytest and includes integration tests:
 
-1. **Unit Tests**
-   - Located in `test_pipeline.py` and `test_pipeline_mocks.py`
-   - Test individual functions and classes with mocks
-
-2. **Integration Tests**
+1. **Integration Tests**
    - Located in `test/test_integration.py`
    - Test the complete pipeline with real audio processing
    - Use real audio samples in `test/data/`
@@ -29,9 +25,6 @@ For convenience, use the provided shell script:
 ### Running Specific Tests
 
 ```bash
-# Run basic unit tests
-python -m pytest test_pipeline.py::test_create_test_audio -v
-
 # Run integration tests (individual steps)
 python -m pytest test/test_integration.py -v --integration
 
@@ -39,7 +32,7 @@ python -m pytest test/test_integration.py -v --integration
 python -m pytest test/test_integration.py::test_full_pipeline -v --integration --runslow
 
 # Run all tests with coverage
-python -m pytest test_pipeline.py test/test_integration.py -v --integration --runslow --cov=. --cov-report=html
+python -m pytest test/test_integration.py -v --integration --runslow --cov=. --cov-report=html
 ```
 
 ## Coverage Report
@@ -80,6 +73,26 @@ The test data in `test/data/` includes:
 
 The project includes a GitHub Actions workflow for automated testing:
 
-- Basic tests run on every push
-- Integration tests can be run manually
+- Integration tests run on every push
+- Full pipeline tests can be run manually
 - See `.github/workflows/test.yml` for details 
+
+## Visualizing Results
+
+The project includes `visualize.py` for analyzing pipeline outputs:
+
+```bash
+# Generate waveform visualization
+python visualize.py waveform input.mp3
+
+# Create speaker diarization timeline
+python visualize.py diarization output/combined_vocals_diarized.json
+
+# Visualize transcript
+python visualize.py transcript output/final_transcription.json
+
+# Create interactive HTML report (most useful)
+python visualize.py report output/final_transcription.json --audio output/combined_vocals.wav
+```
+
+Each command accepts a `--output` parameter to specify the output file location. 
