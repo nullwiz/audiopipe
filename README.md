@@ -1,6 +1,8 @@
 # AudioPipe
 
-A silly script I made for audio separation, speaker diarization, and transcription in a single streamlined process. It's perfect for transcribing podcasts, interviews, or any multi-speaker audio content. Its important to have clear audio.
+A silly script I made for audio separation, speaker diarization, and transcription in a single streamlined process. 
+It's perfect for transcribing podcasts, interviews, or any multi-speaker audio content, as long as they have clear audio.
+In the output, you'll get a JSON file with the transcript, speaker labels, and timestamps. 
 
 ## Features
 
@@ -15,9 +17,9 @@ A silly script I made for audio separation, speaker diarization, and transcripti
 ## Requirements
 
 - Python 3.8+
+- A huggingface token for https://huggingface.co/pyannote/speaker-diarization-3.1
 - FFmpeg (for audio processing)
 - CUDA-compatible GPU (recommended, but CPU mode available)
-- A huggingface token for https://huggingface.co/pyannote/speaker-diarization-3.1 
 
 ### Installation
 
@@ -50,6 +52,7 @@ python pipeline.py input.mp3 --start-step 2  # Skip audio separation
 
 # Process the transcript output
 python process_transcript.py
+
 ```
 
 ## Pipeline Workflow
@@ -69,6 +72,68 @@ python process_transcript.py
 4. **Post-processing** (`process_transcript.py`)
    - Consolidates consecutive segments from the same speaker
    - Creates `output/final_transcription_consolidated.json`
+
+## Output Files Explained
+
+The pipeline creates several files during processing, all stored in the `output/` directory:
+
+### Audio Files
+- **`combined_vocals.wav`**: Extracted voices/speech from the input
+- **`combined_background.wav`**: Background music/noise separated from the input
+- **`speakers/SPEAKER_XX/*.wav`**: Individual audio segments for each speaker
+
+### JSON Files
+- **`combined_vocals_diarized.json`**: Speaker diarization results showing who speaks when
+  ```json
+  {
+    "speakers": ["SPEAKER_01", "SPEAKER_02", ...],
+    "segments": [
+      {"speaker": "SPEAKER_01", "start": 0.0, "end": 2.5},
+      {"speaker": "SPEAKER_02", "start": 2.7, "end": 5.1},
+      ...
+    ]
+  }
+  ```
+
+- **`final_transcription.json`**: Raw transcription with detailed word-by-word segments
+  ```json
+  {
+    "speakers": ["SPEAKER_01", "SPEAKER_02", ...],
+    "segments": [
+      {"speaker": "SPEAKER_01", "text": "Word", "start": 0.1, "end": 0.3},
+      {"speaker": "SPEAKER_01", "text": "by", "start": 0.35, "end": 0.5},
+      {"speaker": "SPEAKER_01", "text": "word", "start": 0.55, "end": 0.8},
+      ...
+    ]
+  }
+  ```
+
+- **`final_transcription_consolidated.json`**: Clean transcript with sentences grouped by speaker
+  ```json
+  {
+    "speakers": ["SPEAKER_01", "SPEAKER_02", ...],
+    "segments": [
+      {
+        "speaker": "SPEAKER_01", 
+        "text": "Word by word combined into sentences.", 
+        "start": 0.1, 
+        "end": 2.5
+      },
+      ...
+    ]
+  }
+  ```
+
+### Temporary Directories
+- **`speakers/`**: Contains subdirectories for each detected speaker
+- **`chunks/`**: Temporary audio chunks used during processing (deleted after completion)
+- **`separated/`**: Intermediate files from audio separation (preserved for resuming)
+
+### Resuming from Steps
+The presence of these files allows the pipeline to resume from different steps:
+- If `combined_vocals.wav` exists, audio separation can be skipped (step 1)
+- If `combined_vocals_diarized.json` exists, diarization can be skipped (step 2)
+- If only post-processing is needed, run `process_transcript.py` directly
 
 ## Supported File Formats
 
@@ -92,7 +157,7 @@ Options:
   --help                     Show this help message
 ```
 
-### dem.py (Audio Separation)
+### dem.py (Audio Separation - removes background noise)
 
 ```
 python dem.py INPUT_FILE
