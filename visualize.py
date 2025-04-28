@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import argparse
 import colorsys
+import time
 
 def create_color_palette(n_colors: int) -> List[str]:
     """
@@ -212,11 +213,12 @@ def plot_transcript(transcript_json_path: str, output_path: Optional[str] = None
     colors = create_color_palette(len(speakers))
     color_map = {speaker: color for speaker, color in zip(speakers, colors)}
     
-    # Calculate figure height based on segments
-    fig_height = 2 + (len(segments) * 0.4)
+    # Calculate figure size - make it more compact
+    fig_width = min(14, max(10, duration / 10))  # Adjust width based on duration
+    fig_height = min(20, max(6, len(segments) * 0.2))  # More compact height
     
     # Create plot
-    fig, ax = plt.subplots(figsize=(14, fig_height))
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     
     # Set title based on file type
     title = "Consolidated Transcript" if consolidated else "Detailed Transcript"
@@ -231,10 +233,11 @@ def plot_transcript(transcript_json_path: str, output_path: Optional[str] = None
     time_interval = max(1, int(duration / 20))  # At most 20 time markers
     time_marks = np.arange(int(min_time), int(max_time) + 1, time_interval)
     for t in time_marks:
-        ax.axvline(x=t, color='gray', linestyle='--', alpha=0.5)
+        ax.axvline(x=t, color='gray', linestyle='--', alpha=0.3)
     
-    # Plot segments with text
-    y_pos = fig_height - 2
+    # Plot segments with text more compactly
+    y_pos = fig_height - 1  # Start closer to the top
+    segment_spacing = 0.7    # Reduce spacing between segments
     
     for i, segment in enumerate(segments):
         speaker = segment['speaker']
@@ -242,11 +245,11 @@ def plot_transcript(transcript_json_path: str, output_path: Optional[str] = None
         end = segment['end']
         text = segment.get('text', '')
         
-        # Draw rectangle for segment
+        # Draw compact rectangle for segment
         rect = patches.Rectangle(
-            (start, y_pos - 0.3), 
+            (start, y_pos - 0.25), 
             end - start, 
-            0.6, 
+            0.5, 
             linewidth=1, 
             edgecolor='black', 
             facecolor=color_map[speaker],
@@ -256,43 +259,47 @@ def plot_transcript(transcript_json_path: str, output_path: Optional[str] = None
         
         # Add speaker label
         ax.text(start - 0.01, y_pos, f"{speaker}", 
-               ha='right', va='center', fontsize=9, 
+               ha='right', va='center', fontsize=8, 
                fontweight='bold', color=color_map[speaker])
         
-        # Add time label
+        # Add time label - made smaller
         time_label = f"[{start:.1f}s - {end:.1f}s]"
-        ax.text(start + (end - start)/2, y_pos + 0.4, time_label, 
-               ha='center', va='center', fontsize=8, color='gray')
+        ax.text(start + (end - start)/2, y_pos + 0.3, time_label, 
+               ha='center', va='center', fontsize=7, color='gray')
         
-        # Highlight keywords if provided
-        if highlight_keywords and any(keyword.lower() in text.lower() for keyword in highlight_keywords):
-            # Split text and highlight keyword occurrences
-            parts = []
-            for word in text.split():
-                if any(keyword.lower() in word.lower() for keyword in highlight_keywords):
-                    parts.append(f"**{word}**")
+        # Format text with wrapping to fit in figure
+        wrapped_text = text
+        if len(text) > 80:  # For long text, wrap it
+            words = text.split()
+            wrapped_text = ""
+            line = ""
+            for word in words:
+                if len(line + " " + word) > 80:
+                    wrapped_text += line + "\n"
+                    line = word
                 else:
-                    parts.append(word)
-            highlighted_text = " ".join(parts)
-            
-            # Add text with highlighted keywords
-            ax.text(start + 0.1, y_pos - 0.8, highlighted_text, 
-                   ha='left', va='center', fontsize=10, wrap=True)
+                    line = line + " " + word if line else word
+            wrapped_text += line
+        
+        # Add text, potentially with highlighting
+        if highlight_keywords and any(keyword.lower() in text.lower() for keyword in highlight_keywords):
+            ax.text(start + 0.1, y_pos - 0.5, wrapped_text, 
+                   ha='left', va='top', fontsize=9, wrap=True,
+                   bbox=dict(facecolor='lightyellow', alpha=0.5, pad=2))
             
             # Draw star marker
-            ax.plot(start, y_pos, marker='*', markersize=10, color='red')
+            ax.plot(start, y_pos, marker='*', markersize=8, color='red')
         else:
-            # Add regular text
-            ax.text(start + 0.1, y_pos - 0.8, text, 
-                   ha='left', va='center', fontsize=10, wrap=True)
+            ax.text(start + 0.1, y_pos - 0.5, wrapped_text, 
+                   ha='left', va='top', fontsize=9, wrap=True)
         
-        y_pos -= 1.5
+        y_pos -= segment_spacing  # More compact spacing
     
-    # Adjust layout
+    # Adjust layout and ensure text fits
     plt.tight_layout()
     
-    # Save plot
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    # Save plot with high DPI for better text rendering
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
     
     return output_path
@@ -326,6 +333,10 @@ def generate_html_report(transcript_path: str, audio_path: Optional[str] = None,
     segments = transcript.get('segments', [])
     speakers = transcript.get('speakers', [])
     
+    if not segments:
+        print(f"No segments found in {transcript_path}")
+        return None
+    
     # Create color palette
     colors = create_color_palette(len(speakers))
     color_map = {speaker: color for speaker, color in zip(speakers, colors)}
@@ -333,7 +344,7 @@ def generate_html_report(transcript_path: str, audio_path: Optional[str] = None,
     # Generate speaker color styles
     speaker_styles = ""
     for speaker, color in color_map.items():
-        speaker_styles += f".{speaker.replace('_', '-')} {{ background-color: {color}; }}\n"
+        speaker_styles += f".{speaker.replace('_', '-')} {{ background-color: {color}; color: white; }}\n"
     
     # Convert audio path to relative if provided
     audio_element = ""
@@ -341,22 +352,66 @@ def generate_html_report(transcript_path: str, audio_path: Optional[str] = None,
         # Get relative path to audio file
         rel_audio_path = os.path.relpath(audio_path, os.path.dirname(output_path))
         audio_element = f"""
-        <div class="audio-player">
-            <h3>Audio Player</h3>
-            <audio controls>
-                <source src="{rel_audio_path}" type="audio/wav">
-                Your browser does not support the audio element.
-            </audio>
+        <div class="card audio-player">
+            <div class="card-header">
+                <h5>Audio Player</h5>
+            </div>
+            <div class="card-body">
+                <audio controls style="width:100%">
+                    <source src="{rel_audio_path}" type="audio/wav">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
         </div>
         """
     
-    # Generate timeline visualization
+    # Generate summary stats
+    total_duration = max(segment['end'] for segment in segments) - min(segment['start'] for segment in segments)
+    total_words = sum(len(segment.get('text', '').split()) for segment in segments)
+    
+    stats_element = f"""
+    <div class="card stats-card">
+        <div class="card-header">
+            <h5>Transcript Stats</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="stat-item">
+                        <div class="stat-value">{len(speakers)}</div>
+                        <div class="stat-label">Speakers</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-item">
+                        <div class="stat-value">{len(segments)}</div>
+                        <div class="stat-label">Segments</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-item">
+                        <div class="stat-value">{int(total_duration)}s</div>
+                        <div class="stat-label">Duration</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-item">
+                        <div class="stat-value">{total_words}</div>
+                        <div class="stat-label">Words</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """
+    
+    # Prepare timeline data with proper escaping for JavaScript
     timeline_data = []
     for segment in segments:
         speaker = segment['speaker']
         start = segment['start']
         end = segment['end']
-        text = segment.get('text', '').replace('"', '\\"')  # Escape quotes for JS
+        text = segment.get('text', '').replace('\\', '\\\\').replace('"', '\\"')
         
         timeline_data.append({
             'speaker': speaker,
@@ -365,146 +420,11 @@ def generate_html_report(transcript_path: str, audio_path: Optional[str] = None,
             'text': text
         })
     
-    # Generate HTML content
-    html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AudioPipe Transcript Report</title>
-    <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            margin: 0;
-            padding: 20px;
-            max-width: 1200px;
-            margin: 0 auto;
-        }}
-        h1, h2, h3 {{
-            color: #2c3e50;
-        }}
-        .container {{
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }}
-        .audio-player {{
-            margin: 20px 0;
-            padding: 15px;
-            background-color: #f8f9fa;
-            border-radius: 5px;
-        }}
-        .timeline {{
-            position: relative;
-            height: 150px;
-            background-color: #f0f0f0;
-            margin: 20px 0;
-            overflow-x: auto;
-            border-radius: 5px;
-        }}
-        .timeline-ruler {{
-            height: 20px;
-            position: relative;
-            background-color: #ddd;
-        }}
-        .timeline-content {{
-            position: relative;
-            height: 130px;
-        }}
-        .timeline-marker {{
-            position: absolute;
-            top: 0;
-            height: 100%;
-            width: 1px;
-            background-color: #666;
-        }}
-        .timeline-label {{
-            position: absolute;
-            top: 2px;
-            transform: translateX(-50%);
-            font-size: 10px;
-        }}
-        .segment {{
-            position: absolute;
-            height: 30px;
-            border-radius: 4px;
-            border: 1px solid #000;
-            top: 40px;
-            opacity: 0.8;
-            cursor: pointer;
-            overflow: hidden;
-            white-space: nowrap;
-            text-overflow: ellipsis;
-            font-size: 12px;
-            padding: 2px 5px;
-            box-sizing: border-box;
-            transition: height 0.2s, top 0.2s;
-        }}
-        .segment:hover {{
-            height: 60px;
-            top: 35px;
-            z-index: 10;
-            opacity: 1;
-        }}
-        .transcript {{
-            margin: 20px 0;
-        }}
-        .transcript-segment {{
-            margin-bottom: 15px;
-            padding: 15px;
-            border-radius: 5px;
-            background-color: #f8f9fa;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }}
-        .transcript-segment:hover {{
-            background-color: #e9ecef;
-        }}
-        .transcript-header {{
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }}
-        .speaker-label {{
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 3px;
-            color: white;
-            font-weight: bold;
-        }}
-        .timestamp {{
-            color: #6c757d;
-            font-size: 0.9em;
-        }}
-        {speaker_styles}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>AudioPipe Transcript Report</h1>
-        
-        {audio_element}
-        
-        <div class="timeline-section">
-            <h3>Interactive Timeline</h3>
-            <div class="timeline">
-                <div class="timeline-ruler" id="timeline-ruler"></div>
-                <div class="timeline-content" id="timeline-content"></div>
-            </div>
-        </div>
-        
-        <div class="transcript">
-            <h3>Transcript</h3>
-            <div id="transcript-content"></div>
-        </div>
-    </div>
-    
+    # Script with proper JavaScript formatting
+    js_script = """
     <script>
         // Timeline data
-        const segments = {json.dumps(timeline_data)};
+        const segments = TIMELINE_DATA_PLACEHOLDER;
         
         // Find total duration
         const maxTime = Math.max(...segments.map(s => s.end));
@@ -513,70 +433,72 @@ def generate_html_report(transcript_path: str, audio_path: Optional[str] = None,
         const timelineRuler = document.getElementById('timeline-ruler');
         const timelineContent = document.getElementById('timeline-content');
         const transcriptContent = document.getElementById('transcript-content');
+        const searchInput = document.getElementById('searchInput');
         
         // Add time markers
         const interval = Math.max(1, Math.ceil(maxTime / 30)); // At most 30 markers
-        for (let i = 0; i <= maxTime; i += interval) {{{{
+        for (let i = 0; i <= maxTime; i += interval) {
             const marker = document.createElement('div');
             marker.className = 'timeline-marker';
-            marker.style.left = `${{{{{{{{(i / maxTime) * 100}}}}}}}}%`;
+            marker.style.left = `${(i / maxTime) * 100}%`;
             
             const label = document.createElement('div');
             label.className = 'timeline-label';
-            label.textContent = `${{{{{{{{i}}}}}}}}s`;
-            label.style.left = `${{{{{{{{(i / maxTime) * 100}}}}}}}}%`;
+            label.textContent = `${i}s`;
+            label.style.left = `${(i / maxTime) * 100}%`;
             
             timelineRuler.appendChild(marker);
             timelineRuler.appendChild(label);
-        }}}}
+        }
         
         // Add segments to timeline
-        segments.forEach((segment, index) => {{{{
+        segments.forEach((segment, index) => {
             const segmentEl = document.createElement('div');
-            segmentEl.className = `segment ${{{{{{{{segment.speaker.replace('_', '-')}}}}}}}}`;
-            segmentEl.style.left = `${{{{{{{{(segment.start / maxTime) * 100}}}}}}}}%`;
-            segmentEl.style.width = `${{{{{{{{((segment.end - segment.start) / maxTime) * 100}}}}}}}}%`;
+            segmentEl.className = `segment ${segment.speaker.replace('_', '-')}`;
+            segmentEl.style.left = `${(segment.start / maxTime) * 100}%`;
+            segmentEl.style.width = `${((segment.end - segment.start) / maxTime) * 100}%`;
             segmentEl.textContent = segment.text.substring(0, 20) + (segment.text.length > 20 ? '...' : '');
             segmentEl.dataset.index = index;
+            segmentEl.title = segment.text;
             
-            segmentEl.addEventListener('click', () => {{{{
+            segmentEl.addEventListener('click', () => {
                 // Scroll to transcript segment
-                const transcriptSegment = document.getElementById(`transcript-${{{{{{{{index}}}}}}}}`);
-                transcriptSegment.scrollIntoView({{{{ behavior: 'smooth' }}}});
+                const transcriptSegment = document.getElementById(`transcript-${index}`);
+                transcriptSegment.scrollIntoView({ behavior: 'smooth' });
                 
                 // Highlight for a moment
                 transcriptSegment.style.backgroundColor = '#e2e3fe';
-                setTimeout(() => {{{{
+                setTimeout(() => {
                     transcriptSegment.style.backgroundColor = '';
-                }}}}, 2000);
+                }, 2000);
                 
                 // Play audio from this point if available
                 const audio = document.querySelector('audio');
-                if (audio) {{{{
+                if (audio) {
                     audio.currentTime = segment.start;
                     audio.play();
-                }}}}
-            }}}});
+                }
+            });
             
             timelineContent.appendChild(segmentEl);
-        }}}});
+        });
         
         // Add segments to transcript
-        segments.forEach((segment, index) => {{{{
+        segments.forEach((segment, index) => {
             const segmentEl = document.createElement('div');
             segmentEl.className = 'transcript-segment';
-            segmentEl.id = `transcript-${{{{{{{{index}}}}}}}}`;
+            segmentEl.id = `transcript-${index}`;
             
             const header = document.createElement('div');
             header.className = 'transcript-header';
             
             const speaker = document.createElement('span');
-            speaker.className = `speaker-label ${{{{{{{{segment.speaker.replace('_', '-')}}}}}}}}`;
+            speaker.className = `speaker-label ${segment.speaker.replace('_', '-')}`;
             speaker.textContent = segment.speaker;
             
             const time = document.createElement('span');
             time.className = 'timestamp';
-            time.textContent = `[${{{{{{{{segment.start.toFixed(1)}}}}}}}}s - ${{{{{{{{segment.end.toFixed(1)}}}}}}}}s]`;
+            time.textContent = `[${segment.start.toFixed(1)}s - ${segment.end.toFixed(1)}s]`;
             
             header.appendChild(speaker);
             header.appendChild(time);
@@ -584,22 +506,308 @@ def generate_html_report(transcript_path: str, audio_path: Optional[str] = None,
             const content = document.createElement('div');
             content.className = 'transcript-content';
             content.textContent = segment.text;
+            content.dataset.originalText = segment.text;
             
             segmentEl.appendChild(header);
             segmentEl.appendChild(content);
             
-            segmentEl.addEventListener('click', () => {{{{
+            segmentEl.addEventListener('click', () => {
                 // Play audio from this point if available
                 const audio = document.querySelector('audio');
-                if (audio) {{{{
+                if (audio) {
                     audio.currentTime = segment.start;
                     audio.play();
-                }}}}
-            }}}});
+                }
+            });
             
             transcriptContent.appendChild(segmentEl);
-        }}}});
+        });
+        
+        // Search functionality
+        searchInput.addEventListener('input', () => {
+            const searchTerm = searchInput.value.toLowerCase().trim();
+            
+            // Reset all highlights first
+            document.querySelectorAll('.transcript-content').forEach(el => {
+                el.innerHTML = el.dataset.originalText;
+            });
+            
+            if (searchTerm.length < 2) return; // Only search for terms with at least 2 characters
+            
+            let foundAny = false;
+            
+            document.querySelectorAll('.transcript-segment').forEach(segment => {
+                const contentEl = segment.querySelector('.transcript-content');
+                const text = contentEl.dataset.originalText.toLowerCase();
+                
+                if (text.includes(searchTerm)) {
+                    // Highlight the matching text
+                    const regex = new RegExp(`(${escapeRegExp(searchTerm)})`, 'gi');
+                    contentEl.innerHTML = contentEl.dataset.originalText.replace(
+                        regex, '<span class="search-highlight">$1</span>'
+                    );
+                    segment.style.display = 'block';
+                    foundAny = true;
+                    
+                    // If it's the first match, scroll to it
+                    if (!foundAny) {
+                        segment.scrollIntoView({ behavior: 'smooth' });
+                    }
+                } else {
+                    segment.style.display = 'block'; // Always show all segments for now
+                }
+            });
+        });
+        
+        // Helper function to escape special characters in search term for regex
+        function escapeRegExp(string) {
+            return string.replace(/[.*+?^${}()|[\\]]/g, '\\$&');
+        }
     </script>
+    """
+    
+    # Insert the timeline data into the JavaScript
+    js_script = js_script.replace("TIMELINE_DATA_PLACEHOLDER", json.dumps(timeline_data))
+    
+    # Generate HTML content with Bootstrap
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioPipe Transcript Report</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {{
+            --primary-color: #3498db;
+            --secondary-color: #2c3e50;
+            --light-bg: #f8f9fa;
+            --dark-bg: #343a40;
+            --success-color: #2ecc71;
+        }}
+        
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+            padding-top: 20px;
+            padding-bottom: 40px;
+        }}
+        
+        .container {{
+            max-width: 1200px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.1);
+            padding: 20px;
+        }}
+        
+        .title-section {{
+            border-bottom: 1px solid #eee;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+        }}
+        
+        h1, h2, h3, h4, h5 {{
+            color: var(--secondary-color);
+        }}
+        
+        .card {{
+            margin-bottom: 20px;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }}
+        
+        .card-header {{
+            background-color: white;
+            border-bottom: 2px solid #f0f0f0;
+            font-weight: bold;
+        }}
+        
+        .audio-player {{
+            background-color: var(--light-bg);
+        }}
+        
+        .stats-card .stat-item {{
+            text-align: center;
+            padding: 10px;
+        }}
+        
+        .stats-card .stat-value {{
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }}
+        
+        .stats-card .stat-label {{
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            color: #6c757d;
+        }}
+        
+        .timeline-container {{
+            position: relative;
+            height: 150px;
+            background-color: #f0f0f0;
+            margin: 20px 0;
+            overflow-x: auto;
+            border-radius: 5px;
+        }}
+        
+        .timeline-ruler {{
+            height: 20px;
+            position: relative;
+            background-color: #e0e0e0;
+        }}
+        
+        .timeline-content {{
+            position: relative;
+            height: 130px;
+        }}
+        
+        .timeline-marker {{
+            position: absolute;
+            top: 0;
+            height: 100%;
+            width: 1px;
+            background-color: #888;
+        }}
+        
+        .timeline-label {{
+            position: absolute;
+            top: 2px;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: #555;
+        }}
+        
+        .segment {{
+            position: absolute;
+            height: 30px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            top: 40px;
+            opacity: 0.9;
+            cursor: pointer;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            font-size: 12px;
+            padding: 2px 5px;
+            box-sizing: border-box;
+            transition: all 0.2s ease;
+            color: white;
+            text-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }}
+        
+        .segment:hover {{
+            height: 60px;
+            top: 30px;
+            z-index: 10;
+            opacity: 1;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+        }}
+        
+        .transcript-segment {{
+            margin-bottom: 15px;
+            border-radius: 5px;
+            background-color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid #eee;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }}
+        
+        .transcript-segment:hover {{
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }}
+        
+        .transcript-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid #f0f0f0;
+        }}
+        
+        .transcript-content {{
+            padding: 10px 15px;
+            line-height: 1.5;
+        }}
+        
+        .speaker-label {{
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            color: white;
+            font-weight: bold;
+        }}
+        
+        .timestamp {{
+            color: #6c757d;
+            font-size: 0.9em;
+        }}
+        
+        .search-box {{
+            margin: 20px 0;
+        }}
+        
+        .search-highlight {{
+            background-color: yellow;
+            font-weight: bold;
+        }}
+        
+        {speaker_styles}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title-section">
+            <h1 class="text-center">AudioPipe Transcript Report</h1>
+            <p class="text-center text-muted">Generated on {time.strftime("%Y-%m-%d %H:%M:%S")}</p>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12">
+                {audio_element}
+                
+                {stats_element}
+                
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Interactive Timeline</h5>
+                        <small class="text-muted">Click on segments to navigate</small>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="timeline-container">
+                            <div class="timeline-ruler" id="timeline-ruler"></div>
+                            <div class="timeline-content" id="timeline-content"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Transcript</h5>
+                        <div class="search-box">
+                            <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search transcript...">
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="transcript-content"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    
+    {js_script}
 </body>
 </html>
 """
@@ -608,6 +816,7 @@ def generate_html_report(transcript_path: str, audio_path: Optional[str] = None,
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html_content)
     
+    print(f"HTML report saved to: {output_path}")
     return output_path
 
 def main():
