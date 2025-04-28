@@ -263,8 +263,15 @@ def transcribe_segment(
     """Transcribe an audio segment using insanely-fast-whisper CLI"""
     device_param = get_device(device)
     
-    # Fix for GitHub Actions environment or any CI without CUDA
-    if device_param == "cuda" and not torch.cuda.is_available():
+    # Check for CI environment (GitHub Actions)
+    is_ci = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("AUDIOPIPE_TESTING") == "1"
+    
+    # Force CPU in CI environments
+    if is_ci:
+        device_param = "cpu"
+        print("CI environment detected. Forcing CPU for transcription.")
+    # Regular check for CUDA availability
+    elif device_param == "cuda" and not torch.cuda.is_available():
         device_param = "cpu"
         print("Warning: CUDA specified but not available. Using CPU instead.")
     
@@ -293,9 +300,11 @@ def transcribe_segment(
         "word",
         "--device-id",
         device_id,
-        "--batch-size",
-        "16",
     ]
+
+    # Only add batch size on GPU
+    if device_param == "cuda":
+        cmd.extend(["--batch-size", "16"])
 
     if language:
         cmd.extend(["--language", language])

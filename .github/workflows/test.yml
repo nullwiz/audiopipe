@@ -11,6 +11,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     environment: master
+    env:
+      AUDIOPIPE_TESTING: 1
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +34,6 @@ jobs:
       
       - name: Setup CI environment
         run: |
-          echo "AUDIOPIPE_TESTING=1" >> $GITHUB_ENV
           echo "# This is a testing environment without GPU" > test/CI_ENVIRONMENT
 
       - name: Install dependencies
@@ -58,6 +59,7 @@ jobs:
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
         run: |
           echo "HUGGING_FACE_TOKEN is set: $(if [ -n \"$HUGGING_FACE_TOKEN\" ]; then echo 'yes'; else echo 'no'; fi)"
+          echo "Running tests in CPU mode (AUDIOPIPE_TESTING=$AUDIOPIPE_TESTING)"
           python -m pytest test/test_integration.py::test_audio_separation -v --integration
           python -m pytest test/test_integration.py::test_diarization -v --integration
           python -m pytest test/test_integration.py::test_transcription -v --integration
