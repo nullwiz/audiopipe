@@ -58,6 +58,8 @@ jobs:
       - name: Run tests with Hugging Face token
         env:
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
+          FORCE_CPU: 1
+          AUDIOPIPE_TESTING: 1
         run: |
           echo "HUGGING_FACE_TOKEN is set: $(if [ -n \"$HUGGING_FACE_TOKEN\" ]; then echo 'yes'; else echo 'no'; fi)"
           echo "Running tests in CPU mode (FORCE_CPU=$FORCE_CPU, AUDIOPIPE_TESTING=$AUDIOPIPE_TESTING)"
@@ -70,6 +72,8 @@ jobs:
         if: matrix.python-version == '3.10'
         env:
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
+          FORCE_CPU: 1
+          AUDIOPIPE_TESTING: 1
         run: |
           python -m pytest test/ --integration --cov=. --cov-report=xml
       

@@ -281,267 +281,167 @@ def extract_audio_segment(audio_path, start, end, output_path):
     segment.export(output_path, format="wav", parameters=["-y"])
 
 
-def transcribe_segment(
-    audio_path,
-    output_path,
-    language=None,
-    current_segment=None,
-    total_segments=None,
-    device=None,
-):
-    """Transcribe an audio segment using insanely-fast-whisper CLI"""
-    # Check for CI environment or forced CPU mode
-    is_ci = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("AUDIOPIPE_TESTING") == "1"
-    force_cpu = os.environ.get("FORCE_CPU") == "1" or is_ci
+def transcribe_segment(segment_path, output_json, model="openai/whisper-medium", language=None, use_gpu=None, testing=False):
+    """Transcribe an audio segment using the insanely-fast-whisper CLI."""
+    # Check for test environment
+    is_ci = os.environ.get('CI', 'false').lower() == 'true'
+    force_cpu = os.environ.get('FORCE_CPU', 'false').lower() == 'true' or os.environ.get('FORCE_CPU', '0') == '1'
+    testing_env = os.environ.get('AUDIOPIPE_TESTING', 'false').lower() == 'true' or os.environ.get('AUDIOPIPE_TESTING', '0') == '1'
     
-    # Debug info
-    print(f"DEBUG: Environment variables:")
-    print(f"  - FORCE_CPU: {os.environ.get('FORCE_CPU', 'not set')}")
-    print(f"  - AUDIOPIPE_TESTING: {os.environ.get('AUDIOPIPE_TESTING', 'not set')}")
-    print(f"  - GITHUB_ACTIONS: {os.environ.get('GITHUB_ACTIONS', 'not set')}")
-    print(f"DEBUG: Flags:")
-    print(f"  - is_ci: {is_ci}")
-    print(f"  - force_cpu: {force_cpu}")
-    print(f"  - device parameter: {device}")
-    print(f"  - CUDA available: {torch.cuda.is_available()}")
+    # Debug output for CI environment
+    if is_ci or force_cpu or testing_env:
+        print(f"DEBUG: CI={is_ci}, FORCE_CPU={force_cpu}, AUDIOPIPE_TESTING={testing_env}")
     
-    # For insanely-fast-whisper, determine device_id
-    if force_cpu or device == "cpu":
-        print("DEBUG: Forcing CPU due to environment variables or explicit request")
-        device_param = "cpu"
-        device_id = "-1"  # CPU mode for whisper
-    elif device == "cuda" and torch.cuda.is_available():
-        print("DEBUG: Using CUDA explicitly")
-        device_param = "cuda"
-        device_id = "0"  # First CUDA device
-    elif device == "mps":
-        print("DEBUG: Using MPS explicitly")
-        device_param = "mps"
-        device_id = "mps"
+    desc = f"🗣️ Transcribing segments"
+    
+    # Determine device settings based on environment and available hardware
+    if force_cpu or testing_env or is_ci:
+        device_id = "-1"  # -1 is used to indicate CPU
     else:
-        # Auto-detect best available device
-        print("DEBUG: Auto-detecting best device")
-        if torch.cuda.is_available():
-            device_param = "cuda"
-            device_id = "0"
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            device_param = "mps"
-            device_id = "mps"
-        else:
-            device_param = "cpu"
-            device_id = "-1"
+        # For CUDA, use device 0 by default
+        device_id = "0" if torch.cuda.is_available() else "-1"
     
-    print(f"DEBUG: Final device configuration: device_param='{device_param}', device_id='{device_id}'")
-
-    # Safely build command
+    # Debug output for device selection
+    if is_ci or force_cpu or testing_env:
+        print(f"DEBUG: Selected device_id: {device_id}")
+    
+    # Base command with required arguments
     cmd = [
         "insanely-fast-whisper",
-        "--file-name", audio_path,
-        "--transcript-path", output_path,
-        "--model-name", "openai/whisper-large-v3",
-        "--timestamp", "word",
-        "--device-id", device_id
+        "--file-name", segment_path,
+        "--model-name", model,
+        "--output-file", output_json,
+        "--device-id", device_id,
     ]
     
-    print(f"DEBUG: Command: {' '.join(cmd)}")
-
-    # Only add batch size on GPU
-    if device_param == "cuda":
-        cmd.extend(["--batch-size", "16"])
-        print("DEBUG: Added batch size for CUDA")
-
+    # Add language parameter if specified
     if language:
         cmd.extend(["--language", language])
-        print(f"DEBUG: Added language: {language}")
-
-    desc = "🗣️ Transcribing segments"
-    if current_segment is not None and total_segments is not None:
-        desc = f"🗣️ Transcribing segment {current_segment}/{total_segments}"
-
+    
+    # Add batch size if using GPU
+    if device_id != "-1":
+        cmd.extend(["--batch-size", "32"])
+    
     try:
         run_command_with_progress(cmd, desc, expected_steps=None)
-    except RuntimeError as e:
+        # Check if the output file was created and has content
+        if not os.path.exists(output_json) or os.path.getsize(output_json) == 0:
+            raise RuntimeError("Transcription output file was not created or is empty")
+        
+    except Exception as e:
+        # Make sure we capture and report any errors during transcription
+        logging.error(f"Error during transcription: {str(e)}")
         print(f"DEBUG: Error during transcription: {str(e)}")
         raise RuntimeError(f"Transcription failed: {str(e)}")
 
-    try:
-        with open(output_path) as f:
-            result = json.load(f)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Failed to parse transcription output: {str(e)}")
-    except FileNotFoundError:
-        raise RuntimeError("Transcription output file not found")
-
-    segments = []
-    for chunk in result["chunks"]:
-        if chunk["timestamp"][0] is None or chunk["timestamp"][1] is None:
-            continue
-        segments.append(
-            {
-                "text": chunk["text"],
-                "start": chunk["timestamp"][0],
-                "end": chunk["timestamp"][1],
-            }
-        )
-    return segments
-
 
 def process_speaker_segments(
-    vocals_path, diarization_data, output_dir, language=None, device=None
+    speakers_segments,
+    audio_path,
+    output_dir,
+    chunk_max_duration=30.0,
+    language=None,
+    device=None,
 ):
-    """Process each speaker's segments and transcribe them"""
-    print("\n[3/3] Running transcription")
+    """Process the speaker segments, create chunks and transcribe them."""
+    display.update_progress(f"🔄 Processing {len(speakers_segments)} speakers...")
+    
+    # Initialize output structure
+    processed_segments = {}
+    
+    # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
-
-    speaker_segments = {}
-    for segment in diarization_data["segments"]:
-        speaker = segment["speaker"]
-        if speaker not in speaker_segments:
-            speaker_segments[speaker] = []
-        speaker_segments[speaker].append(segment)
-
-    all_transcriptions = []
-
-    full_audio = AudioSegment.from_wav(vocals_path)
-
-    MAX_CHUNK_DURATION = 30
-
-    for speaker, segments in speaker_segments.items():
+    
+    # Process each speaker
+    for speaker_idx, (speaker, segments) in enumerate(speakers_segments.items(), 1):
         speaker_dir = os.path.join(output_dir, speaker)
         os.makedirs(speaker_dir, exist_ok=True)
-
+        
+        display.update_progress(f"🔊 Processing {speaker} ({speaker_idx}/{len(speakers_segments)})")
+        
+        # Sort segments by start time to maintain chronological order
         segments.sort(key=lambda x: x["start"])
-
+        
+        # Initialize chunks for this speaker
         chunks = []
         current_chunk = []
         current_duration = 0
-
+        
+        # Group segments into chunks based on max duration
         for segment in segments:
-            duration = segment["end"] - segment["start"]
-
-            if duration > MAX_CHUNK_DURATION:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                    current_chunk = []
-                    current_duration = 0
-
-                start = segment["start"]
-                while start < segment["end"]:
-                    end = min(start + MAX_CHUNK_DURATION, segment["end"])
-                    chunks.append(
-                        [{"start": start, "end": end, "speaker": segment["speaker"]}]
-                    )
-                    start = end
-                continue
-
-            if current_duration + duration > MAX_CHUNK_DURATION:
+            segment_duration = segment["end"] - segment["start"]
+            
+            # If adding this segment exceeds the max duration, start a new chunk
+            if current_duration + segment_duration > chunk_max_duration and current_chunk:
                 chunks.append(current_chunk)
-                current_chunk = []
-                current_duration = 0
-
-            current_chunk.append(segment)
-            current_duration += duration
-
+                current_chunk = [segment]
+                current_duration = segment_duration
+            else:
+                current_chunk.append(segment)
+                current_duration += segment_duration
+        
+        # Add the last chunk if not empty
         if current_chunk:
             chunks.append(current_chunk)
-
-        for chunk_idx, chunk_segments in enumerate(chunks):
-            chunk_audio = AudioSegment.empty()
-            segment_offsets = []
-            current_offset = 0
-
-            for segment in chunk_segments:
-                start_ms = int(segment["start"] * 1000)
-                end_ms = int(segment["end"] * 1000)
-                segment_audio = full_audio[start_ms:end_ms]
-
-                segment_offsets.append(
-                    {
-                        "concat_start": current_offset / 1000,
-                        "orig_start": segment["start"],
-                        "duration": (end_ms - start_ms) / 1000,
-                    }
-                )
-
-                current_offset += len(segment_audio)
-                chunk_audio += segment_audio
-
-            chunk_path = os.path.join(speaker_dir, f"chunk_{chunk_idx}.wav")
-            transcript_path = os.path.join(speaker_dir, f"chunk_{chunk_idx}.json")
-
+        
+        # Initialize processed segments for this speaker
+        processed_segments[speaker] = []
+        
+        # Process each chunk
+        for chunk_idx, chunk in enumerate(chunks):
             try:
-                chunk_audio.export(chunk_path, format="wav", parameters=["-y"])
-
-                display.update_log(
-                    f"🗣️ Transcribing {speaker}'s audio (chunk {chunk_idx + 1}/{len(chunks)})..."
+                display.update_progress(f"📄 Processing {speaker} chunk {chunk_idx+1}/{len(chunks)}")
+                
+                # Extract audio for this chunk
+                chunk_start = chunk[0]["start"]
+                chunk_end = chunk[-1]["end"]
+                chunk_audio_path = os.path.join(speaker_dir, f"chunk_{chunk_idx}.wav")
+                extract_audio_segment(audio_path, chunk_start, chunk_end, chunk_audio_path)
+                
+                # Transcribe the chunk
+                chunk_json_path = os.path.join(speaker_dir, f"chunk_{chunk_idx}.json")
+                
+                # Call the updated transcribe_segment function with the correct parameters
+                transcribe_segment(
+                    segment_path=chunk_audio_path,
+                    output_json=chunk_json_path,
+                    model="openai/whisper-large-v3", 
+                    language=language,
+                    use_gpu=(device != "cpu")
                 )
-                transcription = transcribe_segment(
-                    chunk_path, transcript_path, language=language, device=device
-                )
-
-                for trans in transcription:
-                    # Ensure we have valid float values
-                    trans_start = float(trans["start"]) if trans["start"] is not None else 0.0
-                    trans_end = float(trans["end"]) if trans["end"] is not None else 0.0
-                    
-                    if trans_start >= trans_end:
-                        logging.warning(f"Skipping invalid segment: start={trans_start}, end={trans_end}")
+                
+                # Load and parse the transcription result
+                with open(chunk_json_path, 'r') as f:
+                    result = json.load(f)
+                
+                # Process the transcription results
+                segments_from_chunk = []
+                for item in result["chunks"]:
+                    if item["timestamp"][0] is None or item["timestamp"][1] is None:
                         continue
-
-                    for offset in segment_offsets:
-                        # Calculate segment boundaries
-                        offset_end = offset["concat_start"] + offset["duration"]
-                        
-                        if (
-                            trans_start >= offset["concat_start"]
-                            and trans_start < offset_end
-                        ):
-                            # Calculate adjusted timestamps with proper type checking
-                            try:
-                                orig_start = offset["orig_start"] + (trans_start - offset["concat_start"])
-                                
-                                # Handle potential None or invalid values
-                                orig_end = min(
-                                    offset["orig_start"] + offset["duration"],
-                                    offset["orig_start"] + (trans_end - offset["concat_start"])
-                                )
-                                
-                                # Ensure we have valid values
-                                if orig_end <= orig_start:
-                                    logging.warning(f"Invalid segment timing: start={orig_start}, end={orig_end}")
-                                    continue
-                                
-                                all_transcriptions.append(
-                                    {
-                                        "speaker": speaker,
-                                        "text": trans["text"],
-                                        "start": orig_start,
-                                        "end": orig_end,
-                                    }
-                                )
-                            except (TypeError, ValueError) as e:
-                                logging.error(f"Error processing segment: {e}, segment: {trans}, offset: {offset}")
-                            break
-
+                    
+                    # Adjust timestamps to be relative to the original audio
+                    segment_data = {
+                        "text": item["text"],
+                        "start": chunk_start + item["timestamp"][0],
+                        "end": chunk_start + item["timestamp"][1],
+                    }
+                    segments_from_chunk.append(segment_data)
+                
+                # Add processed segments to the speaker's data
+                processed_segments[speaker].extend(segments_from_chunk)
+                
             except Exception as e:
-                logging.error(
-                    f"Failed to process {speaker} chunk {chunk_idx}: {str(e)}"
-                )
-                if os.path.exists(chunk_path):
-                    os.remove(chunk_path)
-                if os.path.exists(transcript_path):
-                    os.remove(transcript_path)
-                raise RuntimeError(
-                    f"Processing failed for {speaker} chunk {chunk_idx}: {str(e)}"
-                ) from e
-            finally:
-                if os.path.exists(chunk_path):
-                    os.remove(chunk_path)
-                if os.path.exists(transcript_path):
-                    os.remove(transcript_path)
-
-    all_transcriptions.sort(key=lambda x: x["start"])
-    return all_transcriptions
+                logging.error(f"Error processing {speaker} chunk {chunk_idx}: {str(e)}")
+                display.update_progress(f"❌ Error processing {speaker} chunk {chunk_idx}: {str(e)}")
+                print(f"DEBUG: Error processing {speaker} chunk {chunk_idx}: {str(e)}")
+                # Continue with the next chunk instead of failing the entire process
+                continue
+        
+        # Sort the processed segments by start time
+        processed_segments[speaker].sort(key=lambda x: x["start"])
+    
+    return processed_segments
 
 
 def main(input_audio, num_speakers=None, language=None, start_step=1, device=None):
@@ -572,7 +472,7 @@ def main(input_audio, num_speakers=None, language=None, start_step=1, device=Non
 
         output_dir = "output/speakers"
         transcriptions = process_speaker_segments(
-            vocals_path, diarization_data, output_dir, language, device
+            diarization_data["speakers"], vocals_path, output_dir, language, device
         )
 
         output_path = os.path.join("output", "final_transcription.json")
