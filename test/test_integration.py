@@ -120,14 +120,29 @@ def test_transcription(setup_test_env):
     if not diarized_json.exists():
         diarized_json = test_diarization(setup_test_env)
 
+    # Print debug info
+    print(f"FORCE_CPU={os.environ.get('FORCE_CPU', 'not set')}")
+    print(f"AUDIOPIPE_TESTING={os.environ.get('AUDIOPIPE_TESTING', 'not set')}")
+    print(f"GITHUB_ACTIONS={os.environ.get('GITHUB_ACTIONS', 'not set')}")
+
     # Run the full pipeline with start-step 3 (transcription only) and force CPU mode
+    cmd = ["python", "pipeline.py", str(setup_test_env), "--start-step", "3"]
+    print(f"Running command: {' '.join(cmd)}")
+    
     result = subprocess.run(
-        ["python", "pipeline.py", str(setup_test_env), "--start-step", "3", "--device", "cpu"],
+        cmd,
         capture_output=True,
         text=True,
         env={**os.environ, "FORCE_CPU": "1"}  # Force CPU mode in environment
     )
 
+    # In case of failure, print detailed output
+    if result.returncode != 0:
+        print("STDOUT:")
+        print(result.stdout)
+        print("\nSTDERR:")
+        print(result.stderr)
+        
     # Check for success
     assert result.returncode == 0, f"Transcription failed: {result.stderr}"
     
@@ -208,24 +223,37 @@ def test_full_pipeline(setup_test_env):
             if f.is_file():
                 f.unlink()
 
+    # Print debug info
+    print(f"FORCE_CPU={os.environ.get('FORCE_CPU', 'not set')}")
+    print(f"AUDIOPIPE_TESTING={os.environ.get('AUDIOPIPE_TESTING', 'not set')}")
+    print(f"GITHUB_ACTIONS={os.environ.get('GITHUB_ACTIONS', 'not set')}")
+
     # Run the full pipeline with explicit CPU device
+    cmd = [
+        "python",
+        "pipeline.py",
+        str(setup_test_env),
+        "--num-speakers",
+        "2",
+        "--language",
+        "en",
+    ]
+    print(f"Running command: {' '.join(cmd)}")
+    
     result = subprocess.run(
-        [
-            "python",
-            "pipeline.py",
-            str(setup_test_env),
-            "--num-speakers",
-            "2",
-            "--language",
-            "en",
-            "--device",
-            "cpu",
-        ],
+        cmd,
         capture_output=True,
         text=True,
         env={**os.environ, "FORCE_CPU": "1"}  # Force CPU mode in environment
     )
 
+    # In case of failure, print detailed output
+    if result.returncode != 0:
+        print("STDOUT:")
+        print(result.stdout)
+        print("\nSTDERR:")
+        print(result.stderr)
+        
     # Check for success
     assert result.returncode == 0, f"Full pipeline failed: {result.stderr}"
 

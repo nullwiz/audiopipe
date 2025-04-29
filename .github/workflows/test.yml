@@ -63,7 +63,7 @@ jobs:
           echo "Running tests in CPU mode (FORCE_CPU=$FORCE_CPU, AUDIOPIPE_TESTING=$AUDIOPIPE_TESTING)"
           python -m pytest test/test_integration.py::test_audio_separation -v --integration
           python -m pytest test/test_integration.py::test_diarization -v --integration
-          python -m pytest test/test_integration.py::test_transcription -v --integration --device cpu
+          python -m pytest test/test_integration.py::test_transcription -v --integration
           python -m pytest test/test_integration.py::test_consolidation -v --integration
 
       - name: Generate coverage report

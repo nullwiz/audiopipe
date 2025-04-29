@@ -102,27 +102,56 @@ logging.getLogger().addHandler(console_handler)
 
 def get_device(device=None):
     """Determine the appropriate device to use"""
+    print(f"DEBUG: get_device called with parameter: {device}")
+    
+    # Check environment variables that might influence device selection
+    force_cpu = os.environ.get("FORCE_CPU") == "1"
+    is_ci = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("AUDIOPIPE_TESTING") == "1"
+    
+    print(f"DEBUG: Environment checks:")
+    print(f"  - FORCE_CPU env var: {os.environ.get('FORCE_CPU', 'not set')}")
+    print(f"  - CI environment detected: {is_ci}")
+    
+    # Always return CPU if forced by environment variables
+    if force_cpu or is_ci:
+        print(f"DEBUG: Forcing CPU due to environment settings (FORCE_CPU={force_cpu}, is_ci={is_ci})")
+        return "cpu"
+    
+    # Check available hardware
+    cuda_available = torch.cuda.is_available()
+    mps_available = (
+        platform.system() == "Darwin" 
+        and hasattr(torch.backends, "mps") 
+        and torch.backends.mps.is_available()
+    )
+    
+    print(f"DEBUG: Hardware availability:")
+    print(f"  - CUDA available: {cuda_available}")
+    print(f"  - MPS available: {mps_available}")
+    
+    # If specific device requested
     if device:
         if device == "cpu":
+            print(f"DEBUG: CPU explicitly requested")
             return "cpu"
-        elif device == "cuda" and torch.cuda.is_available():
+        elif device == "cuda" and cuda_available:
+            print(f"DEBUG: CUDA explicitly requested and available")
             return "cuda"
-        elif (
-            device == "mps"
-            and hasattr(torch.backends, "mps")
-            and torch.backends.mps.is_available()
-        ):
+        elif device == "mps" and mps_available:
+            print(f"DEBUG: MPS explicitly requested and available")
             return "mps"
-
-    if torch.cuda.is_available():
+        else:
+            print(f"DEBUG: Requested device '{device}' not available or invalid")
+    
+    # Auto-select best available device
+    if cuda_available:
+        print(f"DEBUG: Auto-selecting CUDA (best available)")
         return "cuda"
-    elif (
-        platform.system() == "Darwin"
-        and hasattr(torch.backends, "mps")
-        and torch.backends.mps.is_available()
-    ):
+    elif mps_available:
+        print(f"DEBUG: Auto-selecting MPS (best available)")
         return "mps"
     else:
+        print(f"DEBUG: Auto-selecting CPU (only option available)")
         return "cpu"
 
 
@@ -265,31 +294,44 @@ def transcribe_segment(
     is_ci = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("AUDIOPIPE_TESTING") == "1"
     force_cpu = os.environ.get("FORCE_CPU") == "1" or is_ci
     
-    # Handle device selection
+    # Debug info
+    print(f"DEBUG: Environment variables:")
+    print(f"  - FORCE_CPU: {os.environ.get('FORCE_CPU', 'not set')}")
+    print(f"  - AUDIOPIPE_TESTING: {os.environ.get('AUDIOPIPE_TESTING', 'not set')}")
+    print(f"  - GITHUB_ACTIONS: {os.environ.get('GITHUB_ACTIONS', 'not set')}")
+    print(f"DEBUG: Flags:")
+    print(f"  - is_ci: {is_ci}")
+    print(f"  - force_cpu: {force_cpu}")
+    print(f"  - device parameter: {device}")
+    print(f"  - CUDA available: {torch.cuda.is_available()}")
+    
+    # For insanely-fast-whisper, determine device_id
     if force_cpu or device == "cpu":
-        print("Forcing CPU for transcription.")
+        print("DEBUG: Forcing CPU due to environment variables or explicit request")
         device_param = "cpu"
-        device_id = "-1"
+        device_id = "-1"  # CPU mode for whisper
+    elif device == "cuda" and torch.cuda.is_available():
+        print("DEBUG: Using CUDA explicitly")
+        device_param = "cuda"
+        device_id = "0"  # First CUDA device
+    elif device == "mps":
+        print("DEBUG: Using MPS explicitly")
+        device_param = "mps"
+        device_id = "mps"
     else:
-        # Regular device detection
-        device_param = get_device(device)
-        
-        # Check CUDA availability
-        if device_param == "cuda" and not torch.cuda.is_available():
-            device_param = "cpu"
-            print("Warning: CUDA specified but not available. Using CPU instead.")
-        
-        # For insanely-fast-whisper, set appropriate device_id
-        if device_param == "cpu":
-            device_id = "-1"
-        elif device_param == "cuda":
+        # Auto-detect best available device
+        print("DEBUG: Auto-detecting best device")
+        if torch.cuda.is_available():
+            device_param = "cuda"
             device_id = "0"
-        elif device_param == "mps":
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device_param = "mps"
             device_id = "mps"
         else:
-            device_id = "-1"  # Default to CPU
+            device_param = "cpu"
+            device_id = "-1"
     
-    print(f"Using device '{device_param}' with device-id '{device_id}' for transcription")
+    print(f"DEBUG: Final device configuration: device_param='{device_param}', device_id='{device_id}'")
 
     # Safely build command
     cmd = [
@@ -300,13 +342,17 @@ def transcribe_segment(
         "--timestamp", "word",
         "--device-id", device_id
     ]
+    
+    print(f"DEBUG: Command: {' '.join(cmd)}")
 
     # Only add batch size on GPU
     if device_param == "cuda":
         cmd.extend(["--batch-size", "16"])
+        print("DEBUG: Added batch size for CUDA")
 
     if language:
         cmd.extend(["--language", language])
+        print(f"DEBUG: Added language: {language}")
 
     desc = "🗣️ Transcribing segments"
     if current_segment is not None and total_segments is not None:
@@ -315,6 +361,7 @@ def transcribe_segment(
     try:
         run_command_with_progress(cmd, desc, expected_steps=None)
     except RuntimeError as e:
+        print(f"DEBUG: Error during transcription: {str(e)}")
         raise RuntimeError(f"Transcription failed: {str(e)}")
 
     try:
