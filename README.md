@@ -17,9 +17,9 @@ In the output, you'll get a JSON file with the transcript, speaker labels, and t
 ## Requirements
 
 - Python 3.8+
-- A huggingface token for https://huggingface.co/pyannote/speaker-diarization-3.1
 - FFmpeg (for audio processing)
 - CUDA-compatible GPU (recommended, but CPU mode available)
+- Hugging Face token (optional, for enhanced speaker diarization accuracy)
 
 ### Installation
 
@@ -47,6 +47,9 @@ python pipeline.py input.mp3 --start-step 3  # Skip to transcription step
 
 # Optional parameters:
 python pipeline.py input.mp3 --num-speakers 3 --language en
+
+# For very long audio files (>1 hour), use chopping mode:
+python pipeline.py input.mp3 --chop  # Splits into 15-minute chunks for processing
 ```
 
 ## Pipeline Steps
@@ -63,14 +66,11 @@ The process consists of three main steps that can be run together or separately:
    - Output: `output/combined_vocals_diarized.json`
    - Tip: Use `--num-speakers` for better results when speaker count is known
 
-3. **Transcription** (Step 3): Converts speech to text with timestamps
+3. **Transcription** (Step 3): Converts complete audio to text, then maps speakers
    - Input: `output/combined_vocals.wav` and diarization data
    - Output: `output/final_transcription.json`
+   - Architecture: Complete audio transcription → speaker mapping (no chunking)
    - Tip: Specify `--language` code for improved accuracy
-
-4. **Post-processing** (Optional): Combines consecutive segments from the same speaker
-   - Run separately: `python process_transcript.py`
-   - Output: `output/final_transcription_consolidated.json`
 
 ## Output Files Explained
 
@@ -94,65 +94,45 @@ The pipeline creates several files during processing, all stored in the `output/
   }
   ```
 
-- **`final_transcription.json`**: Raw transcription with detailed word-by-word segments
+- **`final_transcription.json`**: Complete transcription with speaker attribution in chronological order
   ```json
   {
-    "speakers": ["SPEAKER_01", "SPEAKER_02", ...],
     "segments": [
-      {"speaker": "SPEAKER_01", "text": "Word", "start": 0.1, "end": 0.3},
-      {"speaker": "SPEAKER_01", "text": "by", "start": 0.35, "end": 0.5},
-      {"speaker": "SPEAKER_01", "text": "word", "start": 0.55, "end": 0.8},
-      ...
-    ]
-  }
-  ```
-
-- **`final_transcription_consolidated.json`**: Clean transcript with sentences grouped by speaker
-  ```json
-  {
-    "speakers": ["SPEAKER_01", "SPEAKER_02", ...],
-    "segments": [
-      {
-        "speaker": "SPEAKER_01", 
-        "text": "Word by word combined into sentences.", 
-        "start": 0.1, 
-        "end": 2.5
-      },
+      {"text": "Complete sentence or phrase", "start": 0.1, "end": 2.5, "speaker": "SPEAKER_01"},
+      {"text": "Another speaker's response", "start": 2.7, "end": 5.1, "speaker": "SPEAKER_02"},
+      {"text": "Continuing conversation", "start": 5.3, "end": 8.0, "speaker": "SPEAKER_01"},
       ...
     ]
   }
   ```
 
 ### Temporary Directories
-- **`speakers/`**: Contains subdirectories for each detected speaker
-- **`chunks/`**: Temporary audio chunks used during processing (deleted after completion)
 - **`separated/`**: Intermediate files from audio separation (preserved for resuming)
+- **`chunks/`**: Audio chunks when using `--chop` mode (preserved for debugging)
 
 ### Resuming from Steps
 The presence of these files allows the pipeline to resume from different steps:
 - If `combined_vocals.wav` exists, audio separation can be skipped (step 1)
 - If `combined_vocals_diarized.json` exists, diarization can be skipped (step 2)
-- If only post-processing is needed, run `process_transcript.py` directly
 
 ## Visualization Tools
 
 AudioPipe includes tools to visualize your transcripts and generate interactive reports:
 
 ```bash
-# Generate timeline visualization for consolidated transcript (recommended)
-python visualize.py transcript output/final_transcription_consolidated.json
+# Generate timeline visualization for transcript
+python visualize.py transcript output/final_transcription.json
 
 # Generate interactive HTML report with audio playback
-python visualize.py report output/final_transcription_consolidated.json --audio output/combined_vocals.wav
+python visualize.py report output/final_transcription.json --audio output/combined_vocals.wav
 
 # Visualize raw diarization (speaker timeline)
 python visualize.py diarization output/combined_vocals_diarized.json
 ```
 
 For best results:
-1. **Always use consolidated transcripts** for visualization (less Y-axis overflow)
-2. Use the HTML report for interactive exploration of longer content
-3. For very long audio (>30min), consider breaking it into smaller chunks before processing
+1. Use the HTML report for interactive exploration of longer content
+2. For very long audio (>1 hour), use `--chop` mode for processing
 
 ## Supported File Formats
 
@@ -173,6 +153,8 @@ Options:
   --num-speakers, -n INT     Number of speakers (optional, auto-detected if not specified)
   --language, -l STRING      Language code for transcription (e.g., 'en', 'es', 'fr')
   --start-step, -s [1-3]     Start from step: 1=separation, 2=diarization, 3=transcription
+  --chop, -c                 Split input audio into 15-minute chunks for processing
+  --device, -d [cpu|cuda|mps] Device to use for processing (auto-detected if not specified)
   --help                     Show this help message
 ```
 

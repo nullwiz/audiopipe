@@ -198,11 +198,14 @@ def plot_transcript(transcript_json_path: str, output_path: Optional[str] = None
     
     # Extract segments
     segments = transcript.get('segments', [])
-    speakers = transcript.get('speakers', [])
-    
+
     if not segments:
         print(f"No segments found in {transcript_json_path}")
         return None
+
+    # Extract unique speakers from segments (new simple format)
+    speakers = list(set(segment.get('speaker', 'UNKNOWN') for segment in segments))
+    speakers.sort()  # Sort for consistent ordering
     
     # Check if this is likely a non-consolidated transcript with many segments
     if not consolidated and len(segments) > 100:
@@ -352,11 +355,14 @@ def generate_html_report(transcript_path: str, audio_path: Optional[str] = None,
     
     # Extract segments and speakers
     segments = transcript.get('segments', [])
-    speakers = transcript.get('speakers', [])
-    
+
     if not segments:
         print(f"No segments found in {transcript_path}")
         return None
+
+    # Extract unique speakers from segments (new simple format)
+    speakers = list(set(segment.get('speaker', 'UNKNOWN') for segment in segments))
+    speakers.sort()  # Sort for consistent ordering
     
     # Create color palette
     colors = create_color_palette(len(speakers))
