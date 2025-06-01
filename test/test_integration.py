@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-import os
 import json
-import pytest
-import subprocess
+import os
 import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture(scope="module")
 def setup_test_env():
-    """Setup test environment with real test audio files"""
+    """Setup test environment with real test audio files."""
     # Create output directory if it doesn't exist
     os.makedirs("output", exist_ok=True)
 
@@ -39,12 +40,15 @@ def setup_test_env():
 
 @pytest.mark.integration
 def test_audio_separation(setup_test_env):
-    """Test the audio separation step"""
+    """Test the audio separation step."""
     test_input = setup_test_env
 
     # Run audio separation
     result = subprocess.run(
-        ["python", "dem.py", str(test_input)], capture_output=True, text=True
+        ["python", "dem.py", str(test_input)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
     # Check for success
@@ -67,7 +71,7 @@ def test_audio_separation(setup_test_env):
 
 @pytest.mark.integration
 def test_diarization(setup_test_env):
-    """Test the speaker diarization step"""
+    """Test the speaker diarization step."""
     # First run separation if needed
     vocals_path = Path("output/combined_vocals.wav")
     if not vocals_path.exists():
@@ -84,13 +88,14 @@ def test_diarization(setup_test_env):
         ["python", "diarize.py", str(vocals_path), "--num-speakers", "2"],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     # Check for success - print the full output if it fails
     if result.returncode != 0:
         print("STDOUT:", result.stdout)
         print("STDERR:", result.stderr)
-        
+
     assert result.returncode == 0, f"Diarization failed: {result.stderr}"
 
     # Check output file exists
@@ -98,7 +103,7 @@ def test_diarization(setup_test_env):
     assert diarized_json.exists(), "Diarization JSON not created"
 
     # Parse and validate content
-    with open(diarized_json, "r") as f:
+    with open(diarized_json) as f:
         data = json.load(f)
 
     assert "speakers" in data, "Missing speakers in output"
@@ -114,7 +119,7 @@ def test_diarization(setup_test_env):
 
 @pytest.mark.integration
 def test_transcription(setup_test_env):
-    """Test the transcription step"""
+    """Test the transcription step."""
     # Make sure previous steps are done
     diarized_json = Path("output/combined_vocals_diarized.json")
     if not diarized_json.exists():
@@ -128,12 +133,13 @@ def test_transcription(setup_test_env):
     # Run the full pipeline with start-step 3 (transcription only) and force CPU mode
     cmd = ["python", "pipeline.py", str(setup_test_env), "--start-step", "3"]
     print(f"Running command: {' '.join(cmd)}")
-    
+
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
-        env={**os.environ, "FORCE_CPU": "1"}  # Force CPU mode in environment
+        env={**os.environ, "FORCE_CPU": "1"},
+        check=False,  # Force CPU mode in environment
     )
 
     # In case of failure, print detailed output
@@ -142,21 +148,27 @@ def test_transcription(setup_test_env):
         print(result.stdout)
         print("\nSTDERR:")
         print(result.stderr)
-        
+
     # Check for success
     assert result.returncode == 0, f"Transcription failed: {result.stderr}"
-    
+
     # Check output file exists
     transcript_json = Path("output/final_transcription.json")
     assert transcript_json.exists(), "Transcription JSON not created"
 
     # Parse and validate content
-    with open(transcript_json, "r") as f:
+    with open(transcript_json) as f:
         data = json.load(f)
 
-    assert "speakers" in data, "Missing speakers in transcript"
     assert "segments" in data, "Missing segments in transcript"
     assert len(data["segments"]) > 0, "No segments transcribed"
+
+    # Check that segments have the correct format
+    for segment in data["segments"]:
+        assert "text" in segment, "Missing text in segment"
+        assert "start" in segment, "Missing start time in segment"
+        assert "end" in segment, "Missing end time in segment"
+        assert "speaker" in segment, "Missing speaker in segment"
 
     # Check content - should contain specific keywords from our test file
     all_text = " ".join(seg["text"].lower() for seg in data["segments"])
@@ -172,51 +184,13 @@ def test_transcription(setup_test_env):
     return transcript_json
 
 
-@pytest.mark.integration
-def test_consolidation(setup_test_env):
-    """Test the transcript consolidation step"""
-    # Make sure previous steps are done
-    transcript_json = Path("output/final_transcription.json")
-    if not transcript_json.exists():
-        transcript_json = test_transcription(setup_test_env)
-
-    # Run the consolidation
-    result = subprocess.run(
-        ["python", "process_transcript.py"], capture_output=True, text=True
-    )
-
-    # Check for success
-    assert result.returncode == 0, f"Consolidation failed: {result.stderr}"
-
-    # Check output file exists
-    consolidated_json = Path("output/final_transcription_consolidated.json")
-    assert consolidated_json.exists(), "Consolidated JSON not created"
-
-    # Parse and validate content
-    with open(consolidated_json, "r") as f:
-        consolidated_data = json.load(f)
-
-    with open(transcript_json, "r") as f:
-        original_data = json.load(f)
-
-    assert "speakers" in consolidated_data, "Missing speakers in consolidated output"
-    assert "segments" in consolidated_data, "Missing segments in consolidated output"
-
-    # Consolidation should generally produce fewer or equal segments
-    assert len(consolidated_data["segments"]) <= len(original_data["segments"]), (
-        "Consolidation resulted in more segments than the original"
-    )
-
-    print("✅ Consolidation successful")
-    print(f"Original segments: {len(original_data['segments'])}")
-    print(f"Consolidated segments: {len(consolidated_data['segments'])}")
-    return consolidated_json
+# Consolidation test removed - no longer needed with simple architecture
 
 
 @pytest.mark.integration
 @pytest.mark.slow
 def test_full_pipeline(setup_test_env):
-    """Test the entire pipeline from start to finish"""
+    """Test the entire pipeline from start to finish."""
     # Clean output directory
     for pattern in ["combined_*", "*_diarized.json", "final_*.json"]:
         for f in Path("output").glob(pattern):
@@ -239,12 +213,13 @@ def test_full_pipeline(setup_test_env):
         "en",
     ]
     print(f"Running command: {' '.join(cmd)}")
-    
+
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
-        env={**os.environ, "FORCE_CPU": "1"}  # Force CPU mode in environment
+        env={**os.environ, "FORCE_CPU": "1"},
+        check=False,  # Force CPU mode in environment
     )
 
     # In case of failure, print detailed output
@@ -253,7 +228,7 @@ def test_full_pipeline(setup_test_env):
         print(result.stdout)
         print("\nSTDERR:")
         print(result.stderr)
-        
+
     # Check for success
     assert result.returncode == 0, f"Full pipeline failed: {result.stderr}"
 
@@ -264,20 +239,14 @@ def test_full_pipeline(setup_test_env):
     )
     assert Path("output/final_transcription.json").exists(), "Transcription not created"
 
-    # Run consolidation
-    subprocess.run(["python", "process_transcript.py"], check=True)
-    assert Path("output/final_transcription_consolidated.json").exists(), (
-        "Consolidation not created"
-    )
-
     print("✅ Full pipeline successful")
 
     # Print a summary of the final output
-    with open("output/final_transcription_consolidated.json", "r") as f:
+    with open("output/final_transcription.json") as f:
         final_data = json.load(f)
 
     print("\nFinal Transcript:")
-    for i, segment in enumerate(final_data["segments"]):
+    for _i, segment in enumerate(final_data["segments"]):
         print(
             f"{segment['speaker']} ({segment['start']:.1f}-{segment['end']:.1f}): {segment['text']}"
         )

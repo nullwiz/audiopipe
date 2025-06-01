@@ -179,19 +179,7 @@ Options:
   --num-speakers, -n INT     Number of speakers (optional, auto-detected if not specified)
 ```
 
-### process_transcript.py (Post-processing)
-
-```
-python process_transcript.py [INPUT_JSON] [OPTIONS]
-
-Arguments:
-  INPUT_JSON                 Path to input JSON (default: output/final_transcription.json)
-
-Options:
-  --output, -o PATH          Output path for consolidated transcript
-  --max-gap, -g FLOAT        Maximum gap (seconds) to consider segments continuous (default: 3.0)
-  --debug, -d                Show detailed debug info
-```
+# process_transcript.py is no longer needed with the new simple architecture
 
 ## macOS Support
 
@@ -223,17 +211,22 @@ python pipeline.py input.mp3 --device mps
 
 ## Output Format
 
-The final output is a JSON file with the following structure:
+The final output is a JSON file with chronological segments:
 
 ```json
 {
-  "speakers": ["SPEAKER_01", "SPEAKER_02", ...],
   "segments": [
     {
-      "speaker": "SPEAKER_01",
       "text": "Transcript text for this segment",
       "start": 0.5,
-      "end": 4.2
+      "end": 4.2,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Response from another speaker",
+      "start": 4.5,
+      "end": 7.8,
+      "speaker": "SPEAKER_02"
     },
     ...
   ]
@@ -242,22 +235,20 @@ The final output is a JSON file with the following structure:
 
 ## Troubleshooting
 
-- **Audio Processing**: 
-  - Files under 60MB are processed as a single unit for better quality
-  - Larger files are automatically chunked for memory efficiency
+- **Audio Processing**:
+  - Standard mode processes complete audio files for best quality
+  - For very long files (>1 hour), use `--chop` to split into 15-minute chunks
   - If you get memory errors, try using `--device cpu` which uses less memory
-  
+
 - **Transcription Accuracy**:
   - Specify the language with `--language` for better results
+  - Complete audio transcription provides better context than chunking
   - Improved accuracy for clear audio with minimal background noise
-  
+
 - **Speaker Identification**:
   - If speakers are not correctly identified, try setting `--num-speakers`
   - Better results when speakers have distinct voices and don't talk over each other
-  
-- **Visualization Overflow**:
-  - For very long transcripts, use the consolidated JSON file for visualization
-  - Run `python process_transcript.py` before generating visualizations
+  - Hugging Face token improves diarization accuracy but is not required
 
 ## Testing
 

@@ -1,0 +1,222 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audiopipe"
+description = "End-to-end audio processing pipeline with speaker diarization and transcription"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "AudioPipe Contributors"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dynamic = ["version"]
+
+[tool.setuptools_scm]
+write_to = "audiopipe/_version.py"
+
+[tool.ruff]
+# Set line length to 88 characters (Black-compatible)
+line-length = 88
+target-version = "py38"
+
+[tool.ruff.format]
+# Ruff formatter configuration (Black-compatible)
+line-ending = "auto"
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+docstring-code-format = true
+
+# Enable specific rule categories
+lint.select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "D",   # pydocstyle
+    "UP",  # pyupgrade
+    "YTT", # flake8-2020
+    "ANN", # flake8-annotations
+    "S",   # flake8-bandit
+    "BLE", # flake8-blind-except
+    "FBT", # flake8-boolean-trap
+    "B",   # flake8-bugbear
+    "A",   # flake8-builtins
+    "COM", # flake8-commas
+    "C4",  # flake8-comprehensions
+    "DTZ", # flake8-datetimez
+    "T10", # flake8-debugger
+    "EM",  # flake8-errmsg
+    "EXE", # flake8-executable
+    "FA",  # flake8-future-annotations
+    "ISC", # flake8-implicit-str-concat
+    "ICN", # flake8-import-conventions
+    "G",   # flake8-logging-format
+    "INP", # flake8-no-pep420
+    "PIE", # flake8-pie
+    "T20", # flake8-print
+    "PYI", # flake8-pyi
+    "PT",  # flake8-pytest-style
+    "Q",   # flake8-quotes
+    "RSE", # flake8-raise
+    "RET", # flake8-return
+    "SLF", # flake8-self
+    "SLOT", # flake8-slots
+    "SIM", # flake8-simplify
+    "TID", # flake8-tidy-imports
+    "TCH", # flake8-type-checking
+    "INT", # flake8-gettext
+    "ARG", # flake8-unused-arguments
+    "PTH", # flake8-use-pathlib
+    "ERA", # eradicate
+    "PD",  # pandas-vet
+    "PGH", # pygrep-hooks
+    "PL",  # Pylint
+    "TRY", # tryceratops
+    "FLY", # flynt
+    "NPY", # NumPy-specific rules
+    "PERF", # Perflint
+    "RUF", # Ruff-specific rules
+]
+
+# Ignore specific rules that are too strict for this project
+lint.ignore = [
+    "D100", # Missing docstring in public module
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
+    "D104", # Missing docstring in public package
+    "D105", # Missing docstring in magic method
+    "D107", # Missing docstring in __init__
+    "ANN401", # Dynamically typed expressions (Any) are disallowed
+    "S101", # Use of assert detected
+    "T201", # print found
+    "T203", # pprint found
+    "FBT001", # Boolean positional arg in function definition
+    "FBT002", # Boolean default value in function definition
+    "PLR0913", # Too many arguments to function call
+    "PLR0912", # Too many branches
+    "PLR0915", # Too many statements
+    "C901", # Function is too complex
+    "PLR2004", # Magic value used in comparison
+    "S603", # subprocess call: check for execution of untrusted input
+    "S607", # Starting a process with a partial executable path
+    "EM101", # Exception must not use a string literal
+    "EM102", # Exception must not use an f-string literal
+    "TRY003", # Avoid specifying long messages outside the exception class
+    "G004", # Logging statement uses f-string
+    "ISC001", # Implicitly concatenated string literals on one line (conflicts with formatter)
+    "COM812", # Trailing comma missing (conflicts with formatter)
+]
+
+# Exclude specific files and directories
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "separated",
+    "output",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files can have additional flexibility
+"test_*.py" = [
+    "S101", # Use of assert detected
+    "PLR2004", # Magic value used in comparison
+    "ANN001", # Missing type annotation for function argument
+    "ANN201", # Missing return type annotation for public function
+]
+
+# Scripts can print and use subprocess
+"*.py" = [
+    "T201", # print found (allow prints in scripts)
+    "S603", # subprocess call (needed for audio processing)
+    "S607", # Starting a process with a partial executable path
+]
+
+[tool.ruff.lint.isort]
+# Configure import sorting
+known-first-party = ["audiopipe", "types_models"]
+force-single-line = false
+lines-after-imports = 2
+split-on-trailing-comma = true
+
+[tool.ruff.lint.pydocstyle]
+# Use Google-style docstrings
+convention = "google"
+
+[tool.ruff.lint.flake8-annotations]
+# Allow missing annotations in some cases
+allow-star-arg-any = true
+ignore-fully-untyped = true
+
+[tool.ruff.lint.flake8-quotes]
+# Use double quotes
+inline-quotes = "double"
+multiline-quotes = "double"
+
+[tool.mypy]
+# MyPy configuration (can also be in mypy.ini)
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+# External libraries without type stubs
+module = [
+    "torch.*",
+    "torchaudio.*",
+    "pyannote.*",
+    "demucs.*",
+    "pydub.*",
+    "librosa.*",
+    "matplotlib.*",
+    "numpy.*",
+    "soundfile.*",
+    "tqdm.*",
+]
+ignore_missing_imports = true
+
+

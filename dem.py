@@ -1,11 +1,15 @@
-import os
-import subprocess
+from __future__ import annotations
+
 import argparse
-import shutil
 import glob
+import os
 import platform
-from pydub import AudioSegment
+import shutil
+import subprocess
+
 import torch
+from pydub import AudioSegment
+
 
 # Config
 CHUNKS_DIR = "chunks"
@@ -17,14 +21,14 @@ STEM = "vocals"
 MAX_FILE_SIZE_MB = 60  # Maximum file size to process as a single unit
 
 
-def get_device(device=None):
-    """Determine the appropriate device to use"""
+def get_device(device: str | None = None) -> str:
+    """Determine the appropriate device to use."""
     if device:
         if device == "cpu":
             return "cpu"
-        elif device == "cuda" and torch.cuda.is_available():
+        if device == "cuda" and torch.cuda.is_available():
             return "cuda"
-        elif (
+        if (
             device == "mps"
             and hasattr(torch.backends, "mps")
             and torch.backends.mps.is_available()
@@ -33,17 +37,17 @@ def get_device(device=None):
 
     if torch.cuda.is_available():
         return "cuda"
-    elif (
+    if (
         platform.system() == "Darwin"
         and hasattr(torch.backends, "mps")
         and torch.backends.mps.is_available()
     ):
         return "mps"
-    else:
-        return "cpu"
+    return "cpu"
 
 
-def run_demucs_on_chunk(chunk_path, device=None):
+def run_demucs_on_chunk(chunk_path: str, device: str | None = None) -> None:
+    """Run demucs on a single audio chunk."""
     device_arg = get_device(device)
     command = [
         "demucs",
@@ -59,7 +63,8 @@ def run_demucs_on_chunk(chunk_path, device=None):
     subprocess.run(command, check=True)
 
 
-def recombine_stems(stem_path_pattern, output_path):
+def recombine_stems(stem_path_pattern: str, output_path: str) -> None:
+    """Recombine separated audio stems into a single file."""
     print(f"🔗 Recombining: {stem_path_pattern} -> {output_path}")
     parts = sorted(glob.glob(stem_path_pattern))
 
@@ -105,7 +110,8 @@ def recombine_stems(stem_path_pattern, output_path):
     os.remove(concat_list_file)
 
 
-def combine_with_pydub(parts, output_path):
+def combine_with_pydub(parts: list[str], output_path: str) -> None:
+    """Combine audio parts using pydub as fallback."""
     combined = AudioSegment.silent(duration=0)
     for part in parts:
         try:
@@ -126,20 +132,24 @@ def combine_with_pydub(parts, output_path):
     print(f"✅ Exported (via pydub): {output_path} ({size} bytes)")
 
 
-def process_input_file(input_file, device=None):
-    """Process a single input file"""
+def process_input_file(input_file: str, device: str | None = None) -> str:
+    """Process a single input file."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     if os.path.exists(SEPARATED_DIR):
         shutil.rmtree(SEPARATED_DIR)
-        
+
     # Check file size
     file_size_mb = os.path.getsize(input_file) / (1024 * 1024)
     if file_size_mb <= MAX_FILE_SIZE_MB:
-        print(f"🔍 File is under {MAX_FILE_SIZE_MB}MB ({file_size_mb:.1f}MB), processing as a single unit")
+        print(
+            f"🔍 File is under {MAX_FILE_SIZE_MB}MB ({file_size_mb:.1f}MB), processing as a single unit"
+        )
         run_demucs_on_chunk(input_file, device)
     else:
-        print(f"🔍 File is over {MAX_FILE_SIZE_MB}MB ({file_size_mb:.1f}MB), would normally chunk the file")
+        print(
+            f"🔍 File is over {MAX_FILE_SIZE_MB}MB ({file_size_mb:.1f}MB), would normally chunk the file"
+        )
         # For now, we're still processing as a single unit since chunking is handled in the pipeline
         # Future enhancement: implement chunking here
         run_demucs_on_chunk(input_file, device)

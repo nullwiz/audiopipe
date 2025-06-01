@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioPipe - Transcription Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-microphone-alt"></i>
+                    <span class="logo-text">AudioPipe</span>
+                    <span class="logo-subtitle">Transcription Viewer</span>
+                </div>
+                <div class="header-controls">
+                    <button id="theme-toggle" class="btn btn-icon" title="Toggle Dark/Light Theme">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                    <button id="load-file-btn" class="btn btn-primary">
+                        <i class="fas fa-upload"></i>
+                        Load Transcription
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Layout -->
+        <div class="main-layout">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Statistics Panel -->
+                <div class="stats-panel">
+                    <h3><i class="fas fa-chart-bar"></i> Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="total-segments">--</div>
+                            <div class="stat-label">Segments</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="total-speakers">--</div>
+                            <div class="stat-label">Speakers</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="total-duration">--:--</div>
+                            <div class="stat-label">Duration</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="word-count">--</div>
+                            <div class="stat-label">Words</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Speaker Legend -->
+                <div class="speaker-panel">
+                    <h3><i class="fas fa-users"></i> Speakers</h3>
+                    <div id="speaker-legend" class="speaker-legend">
+                        <!-- Speaker items will be populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Export Options -->
+                <div class="export-panel">
+                    <h3><i class="fas fa-download"></i> Export</h3>
+                    <button id="export-text" class="btn btn-secondary btn-full">
+                        <i class="fas fa-file-text"></i>
+                        Copy as Text
+                    </button>
+                    <button id="export-srt" class="btn btn-secondary btn-full">
+                        <i class="fas fa-file-video"></i>
+                        Download SRT
+                    </button>
+                    <button id="export-consolidated" class="btn btn-secondary btn-full">
+                        <i class="fas fa-compress-alt"></i>
+                        Download Consolidated JSON
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="main-content">
+                <!-- Controls Bar -->
+                <div class="controls-bar">
+                    <div class="search-container">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="search-input" placeholder="Search transcription...">
+                            <button id="clear-search" class="btn-clear" style="display: none;">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="view-controls">
+                        <button id="view-timeline" class="btn btn-secondary active">
+                            <i class="fas fa-list"></i>
+                            Timeline
+                        </button>
+                        <button id="view-speakers" class="btn btn-secondary">
+                            <i class="fas fa-user-friends"></i>
+                            By Speaker
+                        </button>
+                        <button id="view-visualization" class="btn btn-secondary">
+                            <i class="fas fa-chart-line"></i>
+                            Visualization
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Audio Player -->
+                <div id="audio-player" class="audio-player" style="display: none;">
+                    <div class="audio-controls">
+                        <button id="play-pause" class="btn btn-icon">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="audio-progress">
+                            <input type="range" id="audio-seek" min="0" max="100" value="0">
+                            <div class="time-display">
+                                <span id="current-time">00:00</span>
+                                <span>/</span>
+                                <span id="total-time">00:00</span>
+                            </div>
+                        </div>
+                        <audio id="audio-element" preload="metadata">
+                            Your browser does not support the audio element.
+                        </audio>
+                    </div>
+                </div>
+
+                <!-- Transcription Display -->
+                <div class="transcription-container">
+                    <!-- Welcome State -->
+                    <div id="welcome-state" class="state-display">
+                        <div class="state-content">
+                            <i class="fas fa-microphone-alt state-icon"></i>
+                            <h2>Welcome to AudioPipe Transcription Viewer</h2>
+                            <p>Load a transcription JSON file to get started</p>
+                            <div class="file-drop-zone" id="file-drop-zone">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <p>Drag and drop your <code>final_transcription.json</code> file here</p>
+                                <p>or</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
+                                    <i class="fas fa-folder-open"></i>
+                                    Browse Files
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div id="loading-state" class="state-display" style="display: none;">
+                        <div class="state-content">
+                            <div class="loading-spinner">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                            <h2>Loading Transcription...</h2>
+                            <p>Processing your transcription file</p>
+                        </div>
+                    </div>
+
+                    <!-- Error State -->
+                    <div id="error-state" class="state-display" style="display: none;">
+                        <div class="state-content">
+                            <i class="fas fa-exclamation-triangle state-icon error"></i>
+                            <h2>Error Loading File</h2>
+                            <p id="error-message">Please check your file format and try again</p>
+                            <button class="btn btn-primary" onclick="resetToWelcome()">
+                                <i class="fas fa-redo"></i>
+                                Try Again
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Transcription Content -->
+                    <div id="transcription-content" class="transcription-content" style="display: none;">
+                        <!-- Segments will be populated here -->
+                    </div>
+
+                    <!-- Audio Visualization -->
+                    <div id="visualization-content" class="visualization-content" style="display: none;">
+                        <!-- Audio Spectrogram -->
+                        <div class="visualization-section">
+                            <h3><i class="fas fa-wave-square"></i> Audio Spectrogram</h3>
+                            <div class="spectrogram-container">
+                                <canvas id="spectrogram-canvas" class="spectrogram-canvas"></canvas>
+                                <div id="spectrogram-loading" class="visualization-loading">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <span>Analyzing audio...</span>
+                                </div>
+                                <div id="spectrogram-error" class="visualization-error clickable" style="display: none;">
+                                    <i class="fas fa-upload"></i>
+                                    <span>Click here to load an audio file for spectrogram visualization</span>
+                                    <small>Supports: MP3, WAV, M4A, FLAC, OGG</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Speaker Timeline -->
+                        <div class="visualization-section">
+                            <h3><i class="fas fa-users"></i> Speaker Timeline</h3>
+                            <div class="speaker-timeline-container">
+                                <div id="speaker-timeline" class="speaker-timeline">
+                                    <!-- Speaker timeline tracks will be populated here -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Consolidated Segments -->
+                        <div class="visualization-section">
+                            <h3><i class="fas fa-compress-alt"></i> Consolidated Segments</h3>
+                            <div class="consolidated-controls">
+                                <label for="consolidation-threshold">Gap Threshold (seconds):</label>
+                                <input type="range" id="consolidation-threshold" min="0.1" max="5.0" step="0.1" value="1.0">
+                                <span id="threshold-value">1.0s</span>
+                                <button id="apply-consolidation" class="btn btn-secondary">
+                                    <i class="fas fa-sync"></i>
+                                    Apply
+                                </button>
+                                <button id="download-consolidated-segments" class="btn btn-primary">
+                                    <i class="fas fa-download"></i>
+                                    Download Consolidated JSON
+                                </button>
+                            </div>
+                            <div id="consolidated-segments" class="consolidated-segments">
+                                <!-- Consolidated segments will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- No Results State -->
+                    <div id="no-results-state" class="state-display" style="display: none;">
+                        <div class="state-content">
+                            <i class="fas fa-search state-icon"></i>
+                            <h2>No Results Found</h2>
+                            <p>Try adjusting your search terms or speaker filters</p>
+                            <button class="btn btn-secondary" onclick="clearSearch()">
+                                <i class="fas fa-times"></i>
+                                Clear Search
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Hidden File Inputs -->
+    <input type="file" id="file-input" accept=".json" style="display: none;">
+    <input type="file" id="audio-file-input" accept=".mp3,.wav,.m4a,.flac,.ogg,audio/*" style="display: none;">
+
+    <!-- Segment Detail Modal -->
+    <div id="segment-modal" class="modal" style="display: none;">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Segment Details</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="segment-details">
+                    <!-- Segment details will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,9 +1,14 @@
-import torch
-from pyannote.audio import Pipeline
+from __future__ import annotations
+
+import argparse
 import json
 import os
-import argparse
 import sys
+from typing import Any
+
+import torch
+from pyannote.audio import Pipeline
+
 
 # --- Config
 # Try to get token from environment variable, otherwise use a default message
@@ -13,21 +18,19 @@ if not HUGGING_FACE_TOKEN:
     print("Please set your Hugging Face token as an environment variable:")
     print("export HUGGING_FACE_TOKEN='your_token_here'")
     print("Or pass it as an environment variable when running the script:")
-    print(
-        "HUGGING_FACE_TOKEN='your_token_here' python diarize.py your_audio.wav"
-    )
+    print("HUGGING_FACE_TOKEN='your_token_here' python diarize.py your_audio.wav")
 
 PIPELINE = "pyannote/speaker-diarization-3.1"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def merge_continuous_fragments(segments):
+def merge_continuous_fragments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge adjacent segments from the same speaker with small gaps."""
     if not segments:
         return segments
 
     # Group segments by speaker
-    segments_by_speaker = {}
+    segments_by_speaker: dict[str, list[dict[str, Any]]] = {}
     for segment in segments:
         speaker = segment["speaker"]
         if speaker not in segments_by_speaker:
@@ -38,7 +41,7 @@ def merge_continuous_fragments(segments):
     for speaker in segments_by_speaker:
         segments_by_speaker[speaker].sort(key=lambda x: x["start"])
 
-    merged_segments = []
+    merged_segments: list[dict[str, Any]] = []
 
     for speaker, speaker_segments in segments_by_speaker.items():
         if not speaker_segments:
@@ -62,10 +65,12 @@ def merge_continuous_fragments(segments):
 
 
 def diarize_audio(
-    audio_path, num_speakers=None, min_speakers=None, max_speakers=None
-):
-    """
-    Standard pyannote 3.1 speaker diarization.
+    audio_path: str,
+    num_speakers: int | None = None,
+    min_speakers: int | None = None,
+    max_speakers: int | None = None,
+) -> list[dict[str, Any]]:
+    """Standard pyannote 3.1 speaker diarization.
 
     Args:
         audio_path: Path to audio file
@@ -105,7 +110,8 @@ def diarize_audio(
             kwargs["min_speakers"] = min_speakers or 4
             kwargs["max_speakers"] = max_speakers or 10
             print(
-                f"🎯 Using speaker range: {kwargs['min_speakers']}-{kwargs['max_speakers']}"
+                f"🎯 Using speaker range: "
+                f"{kwargs['min_speakers']}-{kwargs['max_speakers']}"
             )
         else:
             kwargs["min_speakers"] = 4
@@ -134,12 +140,12 @@ def diarize_audio(
 
         segments.sort(key=lambda x: x["start"])
 
-        unique_speakers = len(set(seg["speaker"] for seg in segments))
+        unique_speakers = len({seg["speaker"] for seg in segments})
         print(f"🎯 Detected {unique_speakers} unique speakers in raw output")
 
         return segments
     except Exception as e:
-        print(f"Error in diarize_audio: {str(e)}", file=sys.stderr)
+        print(f"Error in diarize_audio: {e!s}", file=sys.stderr)
         # Print additional information for debugging
         print(f"Python version: {sys.version}", file=sys.stderr)
         print(f"PyTorch version: {torch.__version__}", file=sys.stderr)
@@ -148,11 +154,8 @@ def diarize_audio(
         raise
 
 
-def combine_diarization_with_transcription(
-    diarization_segments, transcription_chunks
-):
-    """
-    Combine diarization results with transcription chunks to create
+def combine_diarization_with_transcription(diarization_segments, transcription_chunks):
+    """Combine diarization results with transcription chunks to create
     a final output with both speaker IDs and transcribed text.
     """
     combined_output = []
@@ -170,7 +173,7 @@ def combine_diarization_with_transcription(
             {
                 "timestamp": [chunk_start, chunk_end],
                 "text": chunk["text"],
-                "speakers": sorted(list(speakers_in_chunk)),
+                "speakers": sorted(speakers_in_chunk),
             }
         )
 
@@ -189,7 +192,7 @@ def apply_post_processing(raw_segments):
     else:
         print("🔧 No fragmentation detected - segments already optimal")
 
-    final_speakers = sorted(set(seg["speaker"] for seg in merged_segments))
+    final_speakers = sorted({seg["speaker"] for seg in merged_segments})
     print(
         f"🎯 Final speaker count after post-processing: {len(final_speakers)} speakers"
     )
@@ -209,27 +212,23 @@ def process_audio_with_diarization(
     if num_speakers:
         print(f"👥 Using exact number of speakers: {num_speakers}")
     elif min_speakers or max_speakers:
-        print(
-            f"👥 Speaker bounds: {min_speakers or 'auto'} - {max_speakers or 'auto'}"
-        )
+        print(f"👥 Speaker bounds: {min_speakers or 'auto'} - {max_speakers or 'auto'}")
 
     # Get raw diarization segments
-    raw_segments = diarize_audio(
-        audio_path, num_speakers, min_speakers, max_speakers
-    )
+    raw_segments = diarize_audio(audio_path, num_speakers, min_speakers, max_speakers)
 
     # Apply post-processing
     processed_segments = apply_post_processing(raw_segments)
 
     # Create output data
     output_data = {
-        "speakers": sorted(set(seg["speaker"] for seg in processed_segments)),
+        "speakers": sorted({seg["speaker"] for seg in processed_segments}),
         "segments": processed_segments,
     }
 
     # If transcription file exists, combine them
     if transcription_output_path and os.path.exists(transcription_output_path):
-        with open(transcription_output_path, "r") as f:
+        with open(transcription_output_path) as f:
             transcription_data = json.load(f)
 
         combined_output = combine_diarization_with_transcription(
