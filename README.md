@@ -1,6 +1,7 @@
 # AudioPipe
+<img width="909" alt="audiopipe1" src="https://github.com/user-attachments/assets/a92a13c1-c875-4519-8c9e-60f0c165934c" />
 
-A silly script I made for audio separation, speaker diarization, and transcription in a single streamlined process. 
+Denoising, speaker diarization and transcription in a single streamlined process. 
 It's perfect for transcribing podcasts, interviews, or any multi-speaker audio content, as long as they have clear audio.
 In the output, you'll get a JSON file with the transcript, speaker labels, and timestamps. 
 
@@ -179,8 +180,6 @@ Options:
   --num-speakers, -n INT     Number of speakers (optional, auto-detected if not specified)
 ```
 
-# process_transcript.py is no longer needed with the new simple architecture
-
 ## macOS Support
 
 For macOS users, there are two operation modes:
@@ -262,7 +261,6 @@ python -m pytest test/test_integration.py -v --integration
 python -m pytest test/test_integration.py::test_full_pipeline -v --integration --runslow
 ```
 
-### Test Options
 
 - **Full Pipeline Test**: Use `--runslow` to run the complete pipeline test
 - **Hugging Face Token**: For full testing, provide your token with `--hf-token` or set the `HUGGING_FACE_TOKEN` environment variable
