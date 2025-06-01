@@ -1,4 +1,5 @@
 # AudioPipe
+<img width="909" alt="audiopipe1" src="https://github.com/user-attachments/assets/a92a13c1-c875-4519-8c9e-60f0c165934c" />
 
 A silly script I made for audio separation, speaker diarization, and transcription in a single streamlined process. 
 It's perfect for transcribing podcasts, interviews, or any multi-speaker audio content, as long as they have clear audio.
