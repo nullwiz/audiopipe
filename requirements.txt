@@ -11,6 +11,7 @@ dataclasses-json>=0.5.7
 soundfile>=0.12.1
 pytest>=7.0.0
 pytest-cov>=4.0.0
+pytest-timeout>=2.1.0
 edge-tts>=6.1.0
 pydantic>=2.0.0
 mypy>=1.0.0

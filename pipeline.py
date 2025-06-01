@@ -117,13 +117,14 @@ def get_device(device: str | None = None) -> str:
 
     # Check environment variables that might influence device selection
     force_cpu = os.environ.get("FORCE_CPU") == "1"
-    is_ci = (
-        os.environ.get("GITHUB_ACTIONS") == "true"
-        or os.environ.get("AUDIOPIPE_TESTING") == "1"
-    )
+    github_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    audiopipe_testing = os.environ.get("AUDIOPIPE_TESTING") == "1"
+    is_ci = github_actions or audiopipe_testing
 
     print("DEBUG: Environment checks:")
     print(f"  - FORCE_CPU env var: {os.environ.get('FORCE_CPU', 'not set')}")
+    print(f"  - GITHUB_ACTIONS env var: {os.environ.get('GITHUB_ACTIONS', 'not set')}")
+    print(f"  - AUDIOPIPE_TESTING env var: {os.environ.get('AUDIOPIPE_TESTING', 'not set')}")
     print(f"  - CI environment detected: {is_ci}")
 
     # Always return CPU if forced by environment variables
@@ -136,6 +137,20 @@ def get_device(device: str | None = None) -> str:
 
     # Check available hardware
     cuda_available = torch.cuda.is_available()
+
+    # Additional CUDA debugging
+    if cuda_available:
+        try:
+            cuda_device_count = torch.cuda.device_count()
+            current_device = torch.cuda.current_device()
+            device_name = torch.cuda.get_device_name(current_device)
+            print(f"DEBUG: CUDA device count: {cuda_device_count}")
+            print(f"DEBUG: Current CUDA device: {current_device}")
+            print(f"DEBUG: CUDA device name: {device_name}")
+        except Exception as e:
+            print(f"DEBUG: Error getting CUDA info: {e}")
+            cuda_available = False
+
     mps_available = (
         platform.system() == "Darwin"
         and hasattr(torch.backends, "mps")
@@ -145,6 +160,7 @@ def get_device(device: str | None = None) -> str:
     print("DEBUG: Hardware availability:")
     print(f"  - CUDA available: {cuda_available}")
     print(f"  - MPS available: {mps_available}")
+    print(f"  - Platform: {platform.system()}")
 
     # If specific device requested
     if device:
@@ -157,7 +173,8 @@ def get_device(device: str | None = None) -> str:
         if device == "mps" and mps_available:
             print("DEBUG: MPS explicitly requested and available")
             return "mps"
-        print(f"DEBUG: Requested device '{device}' not available or invalid")
+        print(f"DEBUG: Requested device '{device}' not available or invalid, falling back to CPU")
+        return "cpu"
 
     # Auto-select best available device
     if cuda_available:
@@ -315,6 +332,10 @@ def run_complete_transcription(
     """Run insanely-fast-whisper on complete audio file."""
     display.update_progress("🎙️ Running Whisper on complete audio file...")
 
+    # Determine the actual device to use
+    actual_device = get_device(device)
+    print(f"DEBUG: Transcription using device: {actual_device}")
+
     output_json = "output/complete_whisper_transcription.json"
     os.makedirs("output", exist_ok=True)
 
@@ -333,10 +354,13 @@ def run_complete_transcription(
     else:
         cmd.extend(["--language", "en"])
 
-    # Add GPU if available and not forced to CPU
-    if device != "cpu" and torch.cuda.is_available():
+    # Add GPU configuration only if using CUDA and it's actually available
+    if actual_device == "cuda" and torch.cuda.is_available():
+        print("DEBUG: Adding CUDA configuration to Whisper command")
         cmd.extend(["--device-id", "0"])
         cmd.extend(["--batch-size", "32"])
+    else:
+        print(f"DEBUG: Using CPU mode for Whisper (device: {actual_device})")
 
     try:
         result = subprocess.run(
