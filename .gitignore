@@ -5,6 +5,7 @@ separated/
 *_diarized.json
 final_transcription*.json
 combine_list.txt
+sources/
 
 # Logs
 *.log
