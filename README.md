@@ -1,5 +1,5 @@
 # AudioPipe
-<img width="909" alt="audiopipe1" src="https://github.com/user-attachments/assets/a92a13c1-c875-4519-8c9e-60f0c165934c" />
+<img width="1099" alt="Screenshot_1" src="https://github.com/user-attachments/assets/4b98dbf8-351d-4dd3-933e-dc720613e3bb" />
 
 Denoising, speaker diarization and transcription in a single streamlined process. 
 It's perfect for transcribing podcasts, interviews, or any multi-speaker audio content, as long as they have clear audio.
