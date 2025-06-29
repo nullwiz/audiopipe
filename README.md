@@ -266,3 +266,9 @@ python -m pytest test/test_integration.py::test_full_pipeline -v --integration -
 - **Hugging Face Token**: For full testing, provide your token with `--hf-token` or set the `HUGGING_FACE_TOKEN` environment variable
 
 For more details on Testing, check [README.test.md](README.test.md).
+
+
+
+## Known bugs
+- Transcription searching stopped working at some point
+- Some buttons are not working on the visualization page
