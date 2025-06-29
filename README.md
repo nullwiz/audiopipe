@@ -1,4 +1,4 @@
-# AudioPipe
+# [AudioPipe](https://nullwiz.github.io/audiopipe/)
 <img width="1099" alt="Screenshot_1" src="https://github.com/user-attachments/assets/4b98dbf8-351d-4dd3-933e-dc720613e3bb" />
 
 Denoising, speaker diarization and transcription in a single streamlined process. 
