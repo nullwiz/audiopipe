@@ -12,18 +12,18 @@ import (
 )
 
 type AudioPipeApp struct {
-	transcriptionData    *TranscriptionData
-	consolidatedData     []ConsolidatedSegment
-	audioData            *AudioData
-	currentView          string
-	searchQuery          string
-	isDarkTheme          bool
-	statistics           Statistics
-	speakerColors        map[string]string
-	isPlaying            bool
-	currentTime          float64
+	transcriptionData      *TranscriptionData
+	consolidatedData       []ConsolidatedSegment
+	audioData              *AudioData
+	currentView            string
+	searchQuery            string
+	isDarkTheme            bool
+	statistics             Statistics
+	speakerColors          map[string]string
+	isPlaying              bool
+	currentTime            float64
 	consolidationThreshold float64
-	isConsolidated       bool
+	isConsolidated         bool
 }
 
 type TranscriptionData struct {
@@ -61,6 +61,80 @@ type AudioData struct {
 }
 
 var app *AudioPipeApp
+
+func (app *AudioPipeApp) setupDragAndDrop() {
+	document := js.Global().Get("document")
+	dropZone := document.Call("getElementById", "file-drop-zone")
+	if dropZone.IsNull() {
+		log.Printf("Drop zone element not found")
+		return
+	}
+
+	log.Printf("Setting up drag and drop functionality")
+
+	events := []string{"dragenter", "dragover", "dragleave", "drop"}
+	for _, evt := range events {
+		fn := js.FuncOf(app.preventDefaults)
+		dropZone.Call("addEventListener", evt, fn)
+		document.Get("body").Call("addEventListener", evt, fn)
+		fn.Release()
+	}
+
+	addDrag := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		dropZone.Get("classList").Call("add", "drag-over")
+		return nil
+	})
+	dropZone.Call("addEventListener", "dragenter", addDrag)
+	dropZone.Call("addEventListener", "dragover", addDrag)
+	addDrag.Release()
+
+	removeDrag := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		dropZone.Get("classList").Call("remove", "drag-over")
+		return nil
+	})
+	dropZone.Call("addEventListener", "dragleave", removeDrag)
+	dropZone.Call("addEventListener", "drop", removeDrag)
+	removeDrag.Release()
+
+	dropHandler := js.FuncOf(app.handleFileDrop)
+	dropZone.Call("addEventListener", "drop", dropHandler)
+	dropHandler.Release()
+
+	log.Printf("Drag and drop setup completed")
+}
+
+func (app *AudioPipeApp) highlightCurrentSpeaker() {
+	if app.transcriptionData == nil {
+		return
+	}
+
+	doc := js.Global().Get("document")
+	segments := doc.Call("querySelectorAll", ".timeline-segment-item")
+
+	for i := 0; i < segments.Length(); i++ {
+		seg := segments.Index(i)
+
+		startAttr := seg.Call("getAttribute", "data-start")
+		endAttr := seg.Call("getAttribute", "data-end")
+
+		if startAttr.IsNull() || endAttr.IsNull() || startAttr.String() == "" || endAttr.String() == "" {
+			continue
+		}
+
+		start, errS := strconv.ParseFloat(startAttr.String(), 64)
+		end, errE := strconv.ParseFloat(endAttr.String(), 64)
+		if errS != nil || errE != nil {
+			log.Printf("highlightCurrentSpeaker: parse error start=%q end=%q", startAttr, endAttr)
+			continue
+		}
+
+		if app.currentTime >= start && app.currentTime <= end {
+			seg.Get("classList").Call("add", "current-playing")
+		} else {
+			seg.Get("classList").Call("remove", "current-playing")
+		}
+	}
+}
 
 func main() {
 	app = &AudioPipeApp{
@@ -220,46 +294,6 @@ func (app *AudioPipeApp) setupConsolidationControls() {
 	if !applyBtn.IsNull() {
 		applyBtn.Call("addEventListener", "click", js.FuncOf(app.applyConsolidation))
 	}
-}
-
-func (app *AudioPipeApp) setupDragAndDrop() {
-	document := js.Global().Get("document")
-	dropZone := document.Call("getElementById", "file-drop-zone")
-
-	if dropZone.IsNull() {
-		log.Printf("Drop zone element not found")
-		return
-	}
-
-	log.Printf("Setting up drag and drop functionality")
-
-	events := []string{"dragenter", "dragover", "dragleave", "drop"}
-	for _, event := range events {
-		dropZone.Call("addEventListener", event, js.FuncOf(app.preventDefaults))
-		document.Get("body").Call("addEventListener", event, js.FuncOf(app.preventDefaults))
-	}
-
-	dragEvents := []string{"dragenter", "dragover"}
-	for _, event := range dragEvents {
-		dropZone.Call("addEventListener", event, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			log.Printf("Drag event: %s", event)
-			dropZone.Get("classList").Call("add", "drag-over")
-			return nil
-		}))
-	}
-
-	leaveEvents := []string{"dragleave", "drop"}
-	for _, event := range leaveEvents {
-		dropZone.Call("addEventListener", event, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			log.Printf("Drag leave/drop event: %s", event)
-			dropZone.Get("classList").Call("remove", "drag-over")
-			return nil
-		}))
-	}
-
-	dropZone.Call("addEventListener", "drop", js.FuncOf(app.handleFileDrop))
-
-	log.Printf("Drag and drop setup completed")
 }
 
 func (app *AudioPipeApp) preventDefaults(this js.Value, args []js.Value) interface{} {
@@ -1099,16 +1133,16 @@ func (app *AudioPipeApp) showToast(message, toastType string) {
 
 func (app *AudioPipeApp) isValidAudioFormat(fileName, mimeType string) bool {
 	validMimeTypes := []string{
-		"audio/mpeg",     // MP3
-		"audio/mp3",      // MP3 (alternative)
-		"audio/wav",      // WAV
-		"audio/wave",     // WAV (alternative)
-		"audio/x-wav",    // WAV (alternative)
-		"audio/mp4",      // M4A
-		"audio/m4a",      // M4A
-		"audio/aac",      // AAC
-		"audio/ogg",      // OGG
-		"audio/webm",     // WebM
+		"audio/mpeg",  // MP3
+		"audio/mp3",   // MP3 (alternative)
+		"audio/wav",   // WAV
+		"audio/wave",  // WAV (alternative)
+		"audio/x-wav", // WAV (alternative)
+		"audio/mp4",   // M4A
+		"audio/m4a",   // M4A
+		"audio/aac",   // AAC
+		"audio/ogg",   // OGG
+		"audio/webm",  // WebM
 	}
 
 	for _, validType := range validMimeTypes {
@@ -1245,22 +1279,48 @@ func (app *AudioPipeApp) initializeWaveSurfer(file js.Value, fileName string) {
 
 	maxPixelsPerSecond := 2.0
 
-	waveSurfer := waveSurferGlobal.Call("create", map[string]interface{}{
-		"container":        container,
-		"waveColor":        "#22c55e",
-		"progressColor":    "#16a34a",
-		"cursorColor":      "#ffffff",
-		"barWidth":         2,
-		"barRadius":        1,
-		"responsive":       true,
-		"height":           120,
-		"normalize":        true,
-		"backend":          "WebAudio",
-		"pixelRatio":       1,
-		"interact":         true,
-		"hideScrollbar":    true,
-		"minPxPerSec":      maxPixelsPerSecond, // Limit resolution for large files
-	})
+	const maxMediaElementMB = 50.0
+	var waveSurfer js.Value
+
+	sizeMB := bytesToMB(file.Get("size").Float())
+
+	if sizeMB > maxMediaElementMB {
+		backend := "MediaElement"
+		waveSurfer = waveSurferGlobal.Call("create", map[string]interface{}{
+			"container":     container,
+			"backend":       backend,
+			"partialRender": true,
+			"waveColor":     "#22c55e",
+			"progressColor": "#16a34a",
+			"cursorColor":   "#ffffff",
+			"barWidth":      2,
+			"barRadius":     1,
+			"responsive":    true,
+			"height":        120,
+			"normalize":     true,
+			"pixelRatio":    1,
+			"interact":      true,
+			"hideScrollbar": true,
+			"minPxPerSec":   maxPixelsPerSecond, // Limit resolution for large files
+		})
+	} else {
+		waveSurfer = waveSurferGlobal.Call("create", map[string]interface{}{
+			"container":     container,
+			"waveColor":     "#22c55e",
+			"progressColor": "#16a34a",
+			"cursorColor":   "#ffffff",
+			"barWidth":      2,
+			"barRadius":     1,
+			"responsive":    true,
+			"height":        120,
+			"normalize":     true,
+			"backend":       "WebAudio",
+			"pixelRatio":    1,
+			"interact":      true,
+			"hideScrollbar": true,
+			"minPxPerSec":   maxPixelsPerSecond, // Limit resolution for large files
+		})
+	}
 
 	if waveSurfer.IsUndefined() {
 		log.Printf("❌ WAVESURFER CREATION FAILED: Could not create WaveSurfer instance")
@@ -1403,18 +1463,6 @@ func (app *AudioPipeApp) createFallbackWaveform(container js.Value, fileName str
 	app.showToast("Large audio file loaded with simplified waveform", "info")
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
 func (app *AudioPipeApp) updateConsolidationThreshold(this js.Value, args []js.Value) interface{} {
 	if len(args) > 0 {
 		valueStr := args[0].Get("target").Get("value").String()
@@ -1495,42 +1543,6 @@ func (app *AudioPipeApp) consolidateSegmentsByThreshold(threshold float64) []Con
 	return consolidated
 }
 
-
-
-func (app *AudioPipeApp) highlightCurrentSpeaker() {
-	if app.transcriptionData == nil {
-		return
-	}
-
-	document := js.Global().Get("document")
-	segments := document.Call("querySelectorAll", ".timeline-segment-item")
-
-	for i := 0; i < segments.Length(); i++ {
-		segment := segments.Index(i)
-		startAttr := segment.Call("getAttribute", "data-start")
-		endAttr := segment.Call("getAttribute", "data-end")
-
-		if !startAttr.IsNull() && !endAttr.IsNull() {
-			startStr := startAttr.String()
-			endStr := endAttr.String()
-
-			startTime, startErr := strconv.ParseFloat(startStr, 64)
-			endTime, endErr := strconv.ParseFloat(endStr, 64)
-
-			if startErr != nil || endErr != nil {
-				log.Printf("⚠️ SPEAKER HIGHLIGHT: Failed to parse time attributes - start='%s', end='%s'", startStr, endStr)
-				continue
-			}
-
-			if app.currentTime >= startTime && app.currentTime <= endTime {
-				segment.Get("classList").Call("add", "current-playing")
-			} else {
-				segment.Get("classList").Call("remove", "current-playing")
-			}
-		}
-	}
-}
-
 func (app *AudioPipeApp) updateAudioUI() {
 	if app.audioData == nil {
 		return
@@ -1574,8 +1586,6 @@ func (app *AudioPipeApp) togglePlayback(this js.Value, args []js.Value) interfac
 
 	return nil
 }
-
-
 
 func (app *AudioPipeApp) seekAudio(this js.Value, args []js.Value) interface{} {
 	if len(args) > 0 && app.audioData != nil {
@@ -1637,4 +1647,4 @@ func (app *AudioPipeApp) updateTimeDisplay() {
 	}
 }
 
-
+func bytesToMB(b float64) float64 { return b / (1024 * 1024) }
