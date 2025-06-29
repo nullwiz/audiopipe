@@ -48,7 +48,7 @@ body {
   font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
   background: var(--terminal-bg);
   color: var(--terminal-fg);
-  overflow: hidden;
+  overflow: auto;
   height: 100vh;
   line-height: 1.4;
   margin: 0;
@@ -113,7 +113,8 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
+  min-height: 0;
 }
 
 /* Loading Animation */
@@ -386,7 +387,6 @@ body {
   overflow-x: hidden;
   padding: 16px;
   min-height: 0; /* Allow flex shrinking */
-  height: 100%; /* Take full available height */
 }
 
 /* States */
@@ -500,7 +500,6 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 8px; /* Space for scrollbar */
-  max-height: calc(100vh - 300px); /* Ensure scrollable area */
 }
 
 /* Timeline Segments */
@@ -625,7 +624,10 @@ body {
   height: 120px;
   background: var(--waveform-bg);
   position: relative;
-  overflow: hidden;
+  overflow: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  min-width: 100%;
   border: 1px solid var(--terminal-border);
   border-radius: 4px;
 }
@@ -672,11 +674,11 @@ body {
 .results-section {
   background: var(--terminal-input-bg);
   border-radius: 8px;
-  overflow: hidden;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .results-header {
@@ -720,23 +722,22 @@ body {
 
 /* Speaker Timeline Tracks */
 .speaker-timeline-tracks {
-  padding: 16px;
-  display: flex;
+  display: flex; 
   flex-direction: column;
-  gap: 12px;
   flex: 1;
   min-height: 0;
+  max-height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  height: 100%;
+  gap: 16px;
+  padding: 16px 16px 32px 16px; 
 }
 
 .speaker-waveform-track {
   background: var(--speaker-track-bg);
   border: 1px solid var(--terminal-border);
   border-radius: 6px;
-  margin-bottom: 8px;
-  overflow: hidden;
+  min-height: 60px; /* Ensure minimum height for visibility */
 }
 
 .speaker-waveform-header {
@@ -791,6 +792,7 @@ body {
   width: 100%;
   position: relative;
   background: var(--speaker-track-bg);
+  min-height: 40px; /* Ensure minimum height */
 }
 
 .clean-speaker-timeline {
@@ -828,35 +830,45 @@ body {
   z-index: 10;
 }
 
-/* Speaker Color Scheme - Based on Reference */
+/* Speaker Color Scheme - Distinct Colors */
 .speaker-segment.speaker-0,
 .speaker-segment-bar.speaker-0 {
-  background: linear-gradient(135deg, #d4a574, #c49660);
+  background: linear-gradient(135deg, #ff6b6b, #ee5a52);
 }
 
 .speaker-segment.speaker-1,
 .speaker-segment-bar.speaker-1 {
-  background: linear-gradient(135deg, #7ba3d4, #6b93c4);
+  background: linear-gradient(135deg, #4ecdc4, #44a08d);
 }
 
 .speaker-segment.speaker-2,
 .speaker-segment-bar.speaker-2 {
-  background: linear-gradient(135deg, #a47bd4, #946bc4);
+  background: linear-gradient(135deg, #45b7d1, #96c93d);
 }
 
 .speaker-segment.speaker-3,
 .speaker-segment-bar.speaker-3 {
-  background: linear-gradient(135deg, #74d4a5, #60c491);
+  background: linear-gradient(135deg, #f9ca24, #f0932b);
 }
 
 .speaker-segment.speaker-4,
 .speaker-segment-bar.speaker-4 {
-  background: linear-gradient(135deg, #d47474, #c46060);
+  background: linear-gradient(135deg, #6c5ce7, #a29bfe);
 }
 
 .speaker-segment.speaker-5,
 .speaker-segment-bar.speaker-5 {
-  background: linear-gradient(135deg, #d4d474, #c4c460);
+  background: linear-gradient(135deg, #fd79a8, #fdcb6e);
+}
+
+.speaker-segment.speaker-6,
+.speaker-segment-bar.speaker-6 {
+  background: linear-gradient(135deg, #00b894, #00cec9);
+}
+
+.speaker-segment.speaker-7,
+.speaker-segment-bar.speaker-7 {
+  background: linear-gradient(135deg, #e17055, #d63031);
 }
 
 /* Custom Scrollbars */
@@ -1003,3 +1015,25 @@ body {
     justify-content: center;
   }
 }
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--terminal-input-bg);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--terminal-accent);
+  border-radius: 4px;
+  border: 1px solid var(--terminal-border);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--terminal-button-hover);
+  border-color: var(--terminal-accent);
+}
+

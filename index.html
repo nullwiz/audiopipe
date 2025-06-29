@@ -25,21 +25,6 @@
 </head>
 <body class="terminal-theme">
     <div class="terminal-container">
-        <!-- <div class="terminal-header"> -->
-        <!--     <div class="terminal-controls"> -->
-        <!--         <div class="terminal-button close"></div> -->
-        <!--         <div class="terminal-button minimize"></div> -->
-        <!--         <div class="terminal-button maximize"></div> -->
-        <!--     </div> -->
-        <!--     <div class="terminal-actions"> -->
-        <!--         <button id="install-pwa" class="terminal-btn" style="display: none;" title="Install AudioPipe"> -->
-        <!--             <i class="fas fa-download"></i> -->
-        <!--         </button> -->
-        <!--         <button id="theme-toggle" class="terminal-btn"> -->
-        <!--             <i class="fas fa-moon"></i> -->
-        <!--         </button> -->
-        <!--     </div> -->
-        <!-- </div> -->
         <div class="terminal-content">
             <div id="wasm-loading" class="terminal-loading">
                 <div class="loading-spinner"></div>
@@ -69,10 +54,6 @@
                         <div class="stat-item">
                             <div class="stat-label">SEGMENTS</div>
                             <div class="stat-value" id="segment-count">0</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-label">SPEAKERS</div>
-                            <div class="stat-value" id="speaker-count">0</div>
                         </div>
                         <div class="stat-item">
                             <div class="stat-label">DURATION</div>
@@ -236,15 +217,6 @@
                         <div class="results-section">
                             <div class="results-header">
                                 <h3>Results</h3>
-                                <div class="results-controls">
-                                    <button class="results-btn">
-                                        <i class="fas fa-download"></i>
-                                        Download
-                                    </button>
-                                    <button class="results-btn">
-                                        <i class="fas fa-cog"></i>
-                                    </button>
-                                </div>
                             </div>
 
                             <div id="speaker-waveforms" class="speaker-timeline-tracks">
