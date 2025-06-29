@@ -154,6 +154,9 @@ body {
 .terminal-cli {
   padding: 16px;
   border-bottom: 1px solid var(--terminal-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .cli-prompt {
