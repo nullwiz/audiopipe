@@ -167,7 +167,7 @@ exclude = [
 
 [tool.ruff.lint.isort]
 # Configure import sorting
-known-first-party = ["audiopipe", "types_models"]
+known-first-party = ["audiopipe"] 
 force-single-line = false
 lines-after-imports = 2
 split-on-trailing-comma = true
