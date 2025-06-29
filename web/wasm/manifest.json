@@ -1,0 +1,71 @@
+{
+  "name": "AudioPipe WASM - Terminal Transcription Viewer",
+  "short_name": "AudioPipe",
+  "description": "High-performance WebAssembly transcription viewer with terminal-style interface",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#00ff00",
+  "orientation": "any",
+  "scope": "./",
+  "lang": "en",
+  "categories": ["productivity", "utilities", "audio"],
+  "icons": [],
+  "screenshots": [
+    {
+      "src": "screenshots/desktop-1.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "AudioPipe terminal interface on desktop"
+    },
+    {
+      "src": "screenshots/mobile-1.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "AudioPipe mobile interface"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Load Transcription",
+      "short_name": "Load",
+      "description": "Quickly load a transcription file",
+      "url": "./index.html?action=load",
+      "icons": [
+        {
+          "src": "icons/icon-96x96.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "./index.html",
+      "accept": {
+        "application/json": [".json"]
+      }
+    }
+  ],
+  "share_target": {
+    "action": "./index.html",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "transcription",
+          "accept": ["application/json", ".json"]
+        }
+      ]
+    }
+  },
+  "protocol_handlers": [
+    {
+      "protocol": "web+audiopipe",
+      "url": "./index.html?transcription=%s"
+    }
+  ]
+}
