@@ -120,7 +120,6 @@ def test_diarization(setup_test_env):
     assert len(data["segments"]) > 0, "No segments detected"
 
     print(f"✅ Diarization successful with {len(data['segments'])} segments")
-    return diarized_json
 
 
 @pytest.mark.integration
@@ -189,7 +188,6 @@ def test_transcription(setup_test_env):
 
     print(f"✅ Transcription successful with {len(data['segments'])} segments")
     print(f"Found expected phrases: {found_phrases}")
-    return transcript_json
 
 
 @pytest.mark.integration

@@ -342,13 +342,87 @@ def extract_audio_segment(
 def run_complete_transcription(
     audio_path: str, language: str | None = None, device: str | None = None
 ) -> dict[str, Any]:
-    """Run insanely-fast-whisper on complete audio file."""
+    """Run Whisper transcription on complete audio file."""
     display.update_progress("🎙️ Running Whisper on complete audio file...")
 
     # Determine the actual device to use
     actual_device = get_device(device)
     print(f"DEBUG: Transcription using device: {actual_device}")
 
+    # insanely-fast-whisper only supports CUDA and MPS, not CPU
+    # For CPU mode, we need to use transformers directly
+    if actual_device == "cpu":
+        print(
+            "DEBUG: Using CPU fallback with transformers (insanely-fast-whisper doesn't support CPU)"
+        )
+        return run_cpu_transcription(audio_path, language)
+    else:
+        print(f"DEBUG: Using insanely-fast-whisper with {actual_device}")
+        return run_gpu_transcription(audio_path, language, actual_device)
+
+
+def run_cpu_transcription(
+    audio_path: str, language: str | None = None
+) -> dict[str, Any]:
+    """Run Whisper transcription using transformers directly for CPU mode."""
+    try:
+        from transformers import pipeline as hf_pipeline
+        import librosa
+
+        print("DEBUG: Loading Whisper model directly with transformers for CPU")
+
+        # Load the pipeline with explicit CPU device
+        pipe = hf_pipeline(
+            "automatic-speech-recognition",
+            model="openai/whisper-large-v3",
+            device=-1,  # Force CPU
+            torch_dtype=torch.float32,
+        )
+
+        print("DEBUG: Loading audio file")
+        # Load audio file
+        audio, sr = librosa.load(audio_path, sr=16000)
+
+        print("DEBUG: Running transcription on CPU")
+        # Run transcription
+        result = pipe(
+            audio,
+            return_timestamps=True,
+            generate_kwargs={"language": language or "en"},
+        )
+
+        print("DEBUG: Processing transcription results")
+        # Convert to the expected format
+        chunks = []
+        if "chunks" in result:
+            for chunk in result["chunks"]:
+                chunks.append(
+                    {
+                        "text": chunk["text"].strip(),
+                        "timestamp": chunk["timestamp"],
+                    }
+                )
+        else:
+            # Fallback if no chunks
+            chunks.append(
+                {
+                    "text": result["text"].strip(),
+                    "timestamp": [0.0, len(audio) / sr],
+                }
+            )
+
+        display.update_progress(f"✅ Whisper completed: {len(chunks)} chunks")
+        return {"chunks": chunks}
+
+    except Exception as e:
+        print(f"DEBUG: CPU transcription failed: {e}")
+        raise RuntimeError(f"CPU transcription failed: {e}")
+
+
+def run_gpu_transcription(
+    audio_path: str, language: str | None = None, device: str = "cuda"
+) -> dict[str, Any]:
+    """Run Whisper transcription using insanely-fast-whisper for GPU/MPS."""
     output_json = "output/complete_whisper_transcription.json"
     os.makedirs("output", exist_ok=True)
 
@@ -367,16 +441,19 @@ def run_complete_transcription(
     else:
         cmd.extend(["--language", "en"])
 
-    # Add GPU configuration only if using CUDA and it's actually available
-    if actual_device == "cuda" and torch.cuda.is_available():
+    # Add device configuration
+    if device == "cuda" and torch.cuda.is_available():
         print("DEBUG: Adding CUDA configuration to Whisper command")
         cmd.extend(["--device-id", "0"])
         cmd.extend(["--batch-size", "32"])
-    elif actual_device == "mps" and torch.backends.mps.is_available():
+    elif device == "mps":
+        print("DEBUG: Adding MPS configuration to Whisper command")
         cmd.extend(["--device-id", "mps"])
         cmd.extend(["--batch-size", "16"])
     else:
-        print(f"DEBUG: Using CPU mode for Whisper (device: {actual_device})")
+        raise RuntimeError(
+            f"Unsupported device for insanely-fast-whisper: {device}"
+        )
 
     try:
         result = subprocess.run(
