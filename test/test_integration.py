@@ -3,9 +3,15 @@ import json
 import os
 import shutil
 import subprocess
+import torch
 from pathlib import Path
 
 import pytest
+
+
+def is_mps_available():
+    """Check if MPS (Metal Performance Shaders) is available."""
+    return torch.backends.mps.is_available()
 
 
 @pytest.fixture(scope="module")
@@ -108,9 +114,9 @@ def test_diarization(setup_test_env):
 
     assert "speakers" in data, "Missing speakers in output"
     assert "segments" in data, "Missing segments in output"
-    assert len(data["speakers"]) == 2, (
-        f"Expected 2 speakers, got {len(data['speakers'])}"
-    )
+    assert (
+        len(data["speakers"]) == 2
+    ), f"Expected 2 speakers, got {len(data['speakers'])}"
     assert len(data["segments"]) > 0, "No segments detected"
 
     print(f"✅ Diarization successful with {len(data['segments'])} segments")
@@ -173,18 +179,17 @@ def test_transcription(setup_test_env):
     # Check content - should contain specific keywords from our test file
     all_text = " ".join(seg["text"].lower() for seg in data["segments"])
     expected_phrases = ["test", "speaker", "fox", "jump"]
-    found_phrases = [phrase for phrase in expected_phrases if phrase in all_text]
+    found_phrases = [
+        phrase for phrase in expected_phrases if phrase in all_text
+    ]
 
-    assert len(found_phrases) > 0, (
-        f"Expected phrases not found in transcript: {expected_phrases}"
-    )
+    assert (
+        len(found_phrases) > 0
+    ), f"Expected phrases not found in transcript: {expected_phrases}"
 
     print(f"✅ Transcription successful with {len(data['segments'])} segments")
     print(f"Found expected phrases: {found_phrases}")
     return transcript_json
-
-
-# Consolidation test removed - no longer needed with simple architecture
 
 
 @pytest.mark.integration
@@ -234,10 +239,12 @@ def test_full_pipeline(setup_test_env):
 
     # Check output files exist
     assert Path("output/combined_vocals.wav").exists(), "Vocals not created"
-    assert Path("output/combined_vocals_diarized.json").exists(), (
-        "Diarization not created"
-    )
-    assert Path("output/final_transcription.json").exists(), "Transcription not created"
+    assert Path(
+        "output/combined_vocals_diarized.json"
+    ).exists(), "Diarization not created"
+    assert Path(
+        "output/final_transcription.json"
+    ).exists(), "Transcription not created"
 
     print("✅ Full pipeline successful")
 
