@@ -1,5 +1,5 @@
-# AudioPipe
-<img width="909" alt="audiopipe1" src="https://github.com/user-attachments/assets/a92a13c1-c875-4519-8c9e-60f0c165934c" />
+# [AudioPipe](https://nullwiz.github.io/audiopipe/)
+<img width="1099" alt="Screenshot_1" src="https://github.com/user-attachments/assets/4b98dbf8-351d-4dd3-933e-dc720613e3bb" />
 
 Denoising, speaker diarization and transcription in a single streamlined process. 
 It's perfect for transcribing podcasts, interviews, or any multi-speaker audio content, as long as they have clear audio.
@@ -266,3 +266,9 @@ python -m pytest test/test_integration.py::test_full_pipeline -v --integration -
 - **Hugging Face Token**: For full testing, provide your token with `--hf-token` or set the `HUGGING_FACE_TOKEN` environment variable
 
 For more details on Testing, check [README.test.md](README.test.md).
+
+
+
+## Known bugs
+- Transcription searching stopped working at some point
+- Some buttons are not working on the visualization page
