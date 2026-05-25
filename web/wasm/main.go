@@ -531,7 +531,7 @@ func (app *AudioPipeApp) showVisualizationView(this js.Value, args []js.Value) i
 	app.currentView = "visualization"
 	app.hideAllStates()
 
-	if app.transcriptionData != nil {
+	if app.transcriptionData != nil || app.audioData != nil {
 		app.showVisualizationContent()
 		app.setActiveView("view-visualization")
 	} else {
@@ -692,13 +692,19 @@ func (app *AudioPipeApp) renderTimeline() {
 }
 
 func (app *AudioPipeApp) renderSpeakerTimelines() {
-	if app.transcriptionData == nil {
-		return
-	}
-
 	document := js.Global().Get("document")
 	container := document.Call("getElementById", "speaker-waveforms")
 	if container.IsNull() {
+		return
+	}
+
+	if app.transcriptionData == nil {
+		container.Set("innerHTML", `
+			<div class="empty-results">
+				<h3>No transcription loaded</h3>
+				<p>Audio playback is available. This GitHub Pages viewer does not transcribe audio, so load a final_transcription.json file from AudioPipe to see speaker segments.</p>
+			</div>
+		`)
 		return
 	}
 
@@ -1349,13 +1355,8 @@ func (app *AudioPipeApp) initializeWaveSurfer(file js.Value, fileName string) {
 		app.updateAudioUI()
 		app.showToast(fmt.Sprintf("Loaded audio: %s (%.1fs)", fileName, duration), "success")
 
-		if app.transcriptionData != nil {
-			log.Printf("📝 TRANSCRIPTION DATA AVAILABLE: Switching to visualization view")
-			app.showVisualizationView(js.Value{}, []js.Value{})
-		} else {
-			log.Printf("📝 NO TRANSCRIPTION DATA: Staying in upload state")
-			app.showUploadState()
-		}
+		log.Printf("📝 SWITCHING TO VISUALIZATION VIEW")
+		app.showVisualizationView(js.Value{}, []js.Value{})
 
 		return nil
 	}))

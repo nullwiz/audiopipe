@@ -70,7 +70,7 @@
                     <div class="control-section">
                         <button id="load-file-btn" class="terminal-btn primary">
                             <i class="fas fa-upload"></i>
-                            LOAD TRANSCRIPTION
+                            LOAD TRANSCRIPT JSON
                         </button>
 
                         <button id="load-audio-btn" class="terminal-btn secondary">
@@ -134,8 +134,9 @@
                     <div id="welcome-state" class="terminal-state">
                         <div id="file-drop-zone" class="drop-zone">
                             <i class="fas fa-cloud-upload-alt"></i>
-                            <p>Drag & Drop JSON or Audio files here</p>
-                            <p>or click LOAD TRANSCRIPTION / LOAD AUDIO</p>
+                            <p class="drop-zone-title">Load AudioPipe output</p>
+                            <p>GitHub Pages does not transcribe audio. Add a final_transcription.json file to view results.</p>
+                            <p>Optional: add the matching audio file for waveform playback.</p>
                         </div>
                     </div>
 
@@ -150,8 +151,8 @@
                             </div>
                             <div id="loading-message" class="loading-message">Processing file...</div>
                             <div class="loading-details">
-                                <div class="loading-tip">💡 Large audio files may take several minutes to process</div>
-                                <div class="loading-tip">🎵 Supported formats: MP3, WAV, M4A, AAC, OGG (up to 500MB)</div>
+                                <div class="loading-tip">This viewer loads existing AudioPipe JSON transcripts, it does not create them.</div>
+                                <div class="loading-tip">Audio formats for playback: MP3, WAV, M4A, AAC, OGG (up to 500MB)</div>
                             </div>
                         </div>
                     </div>

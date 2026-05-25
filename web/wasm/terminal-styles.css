@@ -248,6 +248,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
 }
 
 .terminal-btn:hover {
@@ -426,6 +427,17 @@ body {
   margin-bottom: 16px;
 }
 
+.drop-zone-title {
+  color: var(--terminal-accent);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.drop-zone p {
+  margin: 8px auto;
+  max-width: 62ch;
+}
+
 /* Processing Animation */
 .processing-animation {
   display: flex;
@@ -476,7 +488,7 @@ body {
   padding: 8px 16px;
   background: var(--terminal-input-bg);
   border-radius: 4px;
-  border-left: 3px solid var(--terminal-accent);
+  border: 1px solid var(--terminal-border);
 }
 
 /* No Results */
@@ -731,6 +743,25 @@ body {
   overflow-x: hidden;
   gap: 16px;
   padding: 16px 16px 32px 16px; 
+}
+
+.empty-results {
+  border: 1px dashed var(--terminal-border);
+  border-radius: 6px;
+  color: var(--terminal-fg);
+  padding: 18px;
+}
+
+.empty-results h3 {
+  font-size: 1em;
+  margin: 0 0 8px 0;
+}
+
+.empty-results p {
+  color: var(--terminal-fg);
+  opacity: 0.8;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .speaker-waveform-track {
@@ -1036,4 +1067,3 @@ body {
   background-color: var(--terminal-button-hover);
   border-color: var(--terminal-accent);
 }
-
