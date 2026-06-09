@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "audiopipe"
 description = "End-to-end audio processing pipeline with speaker diarization and transcription"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "AudioPipe Contributors"},
@@ -16,10 +16,9 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dynamic = ["version"]
 
@@ -29,7 +28,32 @@ write_to = "audiopipe/_version.py"
 [tool.ruff]
 # Set line length to 88 characters (Black-compatible)
 line-length = 88
-target-version = "py38"
+target-version = "py310"
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "separated",
+    "output",
+]
 
 [tool.ruff.format]
 # Ruff formatter configuration (Black-compatible)
@@ -39,61 +63,20 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 docstring-code-format = true
 
+[tool.ruff.lint]
 # Enable specific rule categories
-lint.select = [
+select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
     "F",   # Pyflakes
     "I",   # isort
-    "N",   # pep8-naming
-    "D",   # pydocstyle
     "UP",  # pyupgrade
-    "YTT", # flake8-2020
-    "ANN", # flake8-annotations
-    "S",   # flake8-bandit
-    "BLE", # flake8-blind-except
-    "FBT", # flake8-boolean-trap
     "B",   # flake8-bugbear
-    "A",   # flake8-builtins
-    "COM", # flake8-commas
-    "C4",  # flake8-comprehensions
-    "DTZ", # flake8-datetimez
-    "T10", # flake8-debugger
-    "EM",  # flake8-errmsg
-    "EXE", # flake8-executable
-    "FA",  # flake8-future-annotations
-    "ISC", # flake8-implicit-str-concat
-    "ICN", # flake8-import-conventions
-    "G",   # flake8-logging-format
-    "INP", # flake8-no-pep420
-    "PIE", # flake8-pie
-    "T20", # flake8-print
-    "PYI", # flake8-pyi
-    "PT",  # flake8-pytest-style
-    "Q",   # flake8-quotes
-    "RSE", # flake8-raise
-    "RET", # flake8-return
-    "SLF", # flake8-self
-    "SLOT", # flake8-slots
-    "SIM", # flake8-simplify
-    "TID", # flake8-tidy-imports
-    "TCH", # flake8-type-checking
-    "INT", # flake8-gettext
-    "ARG", # flake8-unused-arguments
-    "PTH", # flake8-use-pathlib
-    "ERA", # eradicate
-    "PD",  # pandas-vet
-    "PGH", # pygrep-hooks
-    "PL",  # Pylint
-    "TRY", # tryceratops
-    "FLY", # flynt
-    "NPY", # NumPy-specific rules
-    "PERF", # Perflint
     "RUF", # Ruff-specific rules
 ]
 
 # Ignore specific rules that are too strict for this project
-lint.ignore = [
+ignore = [
     "D100", # Missing docstring in public module
     "D101", # Missing docstring in public class
     "D102", # Missing docstring in public method
@@ -120,33 +103,6 @@ lint.ignore = [
     "G004", # Logging statement uses f-string
     "ISC001", # Implicitly concatenated string literals on one line (conflicts with formatter)
     "COM812", # Trailing comma missing (conflicts with formatter)
-]
-
-# Exclude specific files and directories
-exclude = [
-    ".bzr",
-    ".direnv",
-    ".eggs",
-    ".git",
-    ".git-rewrite",
-    ".hg",
-    ".mypy_cache",
-    ".nox",
-    ".pants.d",
-    ".pytype",
-    ".ruff_cache",
-    ".svn",
-    ".tox",
-    ".venv",
-    "__pypackages__",
-    "_build",
-    "buck-out",
-    "build",
-    "dist",
-    "node_modules",
-    "venv",
-    "separated",
-    "output",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -188,7 +144,7 @@ multiline-quotes = "double"
 
 [tool.mypy]
 # MyPy configuration (can also be in mypy.ini)
-python_version = "3.8"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -218,5 +174,3 @@ module = [
     "tqdm.*",
 ]
 ignore_missing_imports = true
-
-

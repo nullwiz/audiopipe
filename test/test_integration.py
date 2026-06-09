@@ -3,10 +3,10 @@ import json
 import os
 import shutil
 import subprocess
-import torch
 from pathlib import Path
 
 import pytest
+import torch
 
 
 def is_mps_available():
@@ -44,12 +44,7 @@ def setup_test_env():
     print("\nLeaving output files for inspection in 'output/' directory")
 
 
-@pytest.mark.integration
-def test_audio_separation(setup_test_env):
-    """Test the audio separation step."""
-    test_input = setup_test_env
-
-    # Run audio separation
+def _run_audio_separation(test_input: Path) -> Path:
     result = subprocess.run(
         ["python", "dem.py", str(test_input)],
         capture_output=True,
@@ -76,12 +71,19 @@ def test_audio_separation(setup_test_env):
 
 
 @pytest.mark.integration
+def test_audio_separation(setup_test_env):
+    """Test the audio separation step."""
+    _run_audio_separation(setup_test_env)
+
+
+@pytest.mark.integration
+@pytest.mark.requires_token
 def test_diarization(setup_test_env):
     """Test the speaker diarization step."""
     # First run separation if needed
     vocals_path = Path("output/combined_vocals.wav")
     if not vocals_path.exists():
-        vocals_path = test_audio_separation(setup_test_env)
+        vocals_path = _run_audio_separation(setup_test_env)
 
     # Print debug info
     token = os.environ.get("HUGGING_FACE_TOKEN")
@@ -114,15 +116,16 @@ def test_diarization(setup_test_env):
 
     assert "speakers" in data, "Missing speakers in output"
     assert "segments" in data, "Missing segments in output"
-    assert (
-        len(data["speakers"]) == 2
-    ), f"Expected 2 speakers, got {len(data['speakers'])}"
+    assert len(data["speakers"]) == 2, (
+        f"Expected 2 speakers, got {len(data['speakers'])}"
+    )
     assert len(data["segments"]) > 0, "No segments detected"
 
     print(f"✅ Diarization successful with {len(data['segments'])} segments")
 
 
 @pytest.mark.integration
+@pytest.mark.requires_token
 def test_transcription(setup_test_env):
     """Test the transcription step."""
     # Make sure previous steps are done
@@ -178,13 +181,11 @@ def test_transcription(setup_test_env):
     # Check content - should contain specific keywords from our test file
     all_text = " ".join(seg["text"].lower() for seg in data["segments"])
     expected_phrases = ["test", "speaker", "fox", "jump"]
-    found_phrases = [
-        phrase for phrase in expected_phrases if phrase in all_text
-    ]
+    found_phrases = [phrase for phrase in expected_phrases if phrase in all_text]
 
-    assert (
-        len(found_phrases) > 0
-    ), f"Expected phrases not found in transcript: {expected_phrases}"
+    assert len(found_phrases) > 0, (
+        f"Expected phrases not found in transcript: {expected_phrases}"
+    )
 
     print(f"✅ Transcription successful with {len(data['segments'])} segments")
     print(f"Found expected phrases: {found_phrases}")
@@ -192,6 +193,7 @@ def test_transcription(setup_test_env):
 
 @pytest.mark.integration
 @pytest.mark.slow
+@pytest.mark.requires_token
 def test_full_pipeline(setup_test_env):
     """Test the entire pipeline from start to finish."""
     # Clean output directory
@@ -237,12 +239,10 @@ def test_full_pipeline(setup_test_env):
 
     # Check output files exist
     assert Path("output/combined_vocals.wav").exists(), "Vocals not created"
-    assert Path(
-        "output/combined_vocals_diarized.json"
-    ).exists(), "Diarization not created"
-    assert Path(
-        "output/final_transcription.json"
-    ).exists(), "Transcription not created"
+    assert Path("output/combined_vocals_diarized.json").exists(), (
+        "Diarization not created"
+    )
+    assert Path("output/final_transcription.json").exists(), "Transcription not created"
 
     print("✅ Full pipeline successful")
 
@@ -252,9 +252,11 @@ def test_full_pipeline(setup_test_env):
 
     print("\nFinal Transcript:")
     for _i, segment in enumerate(final_data["segments"]):
-        print(
-            f"{segment['speaker']} ({segment['start']:.1f}-{segment['end']:.1f}): {segment['text']}"
-        )
+        speaker = segment["speaker"]
+        start = segment["start"]
+        end = segment["end"]
+        text = segment["text"]
+        print(f"{speaker} ({start:.1f}-{end:.1f}): {text}")
 
 
 if __name__ == "__main__":

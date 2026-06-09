@@ -43,7 +43,7 @@ def merge_continuous_fragments(segments: list[dict[str, Any]]) -> list[dict[str,
 
     merged_segments: list[dict[str, Any]] = []
 
-    for speaker, speaker_segments in segments_by_speaker.items():
+    for _speaker, speaker_segments in segments_by_speaker.items():
         if not speaker_segments:
             continue
 
@@ -154,7 +154,10 @@ def diarize_audio(
         raise
 
 
-def combine_diarization_with_transcription(diarization_segments, transcription_chunks):
+def combine_diarization_with_transcription(
+    diarization_segments: list[dict[str, Any]],
+    transcription_chunks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Combine diarization results with transcription chunks to create
     a final output with both speaker IDs and transcribed text.
     """
@@ -180,7 +183,9 @@ def combine_diarization_with_transcription(diarization_segments, transcription_c
     return combined_output
 
 
-def apply_post_processing(raw_segments):
+def apply_post_processing(
+    raw_segments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Apply conservative merging to raw diarization segments."""
     print("🔧 Applying post-processing to raw diarization output...")
 
@@ -201,12 +206,12 @@ def apply_post_processing(raw_segments):
 
 
 def process_audio_with_diarization(
-    audio_path,
-    transcription_output_path=None,
-    num_speakers=None,
-    min_speakers=None,
-    max_speakers=None,
-):
+    audio_path: str,
+    transcription_output_path: str | None = None,
+    num_speakers: int | None = None,
+    min_speakers: int | None = None,
+    max_speakers: int | None = None,
+) -> str:
     """Main function to process audio with diarization and optional post-processing."""
     print(f"🚀 Running diarization on {DEVICE}")
     if num_speakers:

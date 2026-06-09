@@ -18,8 +18,14 @@ The project uses pytest and includes integration tests:
 For convenience, use the provided shell script:
 
 ```bash
-# Run all tests with coverage report
+# Run the safe default test pass
 ./run_tests.sh
+
+# Include integration tests
+AUDIOPIPE_INTEGRATION=1 ./run_tests.sh
+
+# Include slow tests as well
+AUDIOPIPE_INTEGRATION=1 AUDIOPIPE_SLOW=1 ./run_tests.sh
 ```
 
 ### Running Specific Tests
@@ -86,4 +92,4 @@ python visualize.py transcript output/final_transcription.json
 python visualize.py report output/final_transcription.json --audio output/combined_vocals.wav
 ```
 
-Each command accepts a `--output` parameter to specify the output file location. 
+Each command accepts a `--output` parameter to specify the output file location.

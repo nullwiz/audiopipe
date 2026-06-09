@@ -40,7 +40,7 @@ jobs:
         
     - name: Run MyPy type checking
       run: |
-        mypy --config-file mypy.ini pipeline.py diarize.py types_models.py
+        mypy --config-file mypy.ini dem.py diarize.py pipeline.py
         
     - name: Run Ruff linting
       run: |
@@ -204,7 +204,7 @@ jobs:
         
     - name: Run integration tests
       run: |
-        pytest test/test_integration.py -v --tb=short -m integration
+        pytest test/test_integration.py -v --tb=short --integration
         
     - name: Upload integration test results
       uses: actions/upload-artifact@v3

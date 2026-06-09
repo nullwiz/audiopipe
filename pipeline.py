@@ -8,7 +8,7 @@ import select
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, cast
 
 import torch
 from pydub import AudioSegment
@@ -67,9 +67,7 @@ class RetroDisplay:
             return
 
         # Calculate lines needed for display
-        progress_lines = (
-            self.progress_line.count("\n") + 1 if self.progress_line else 0
-        )
+        progress_lines = self.progress_line.count("\n") + 1 if self.progress_line else 0
         log_lines = self.log_line.count("\n") + 1 if self.log_line else 0
         total_lines = progress_lines + log_lines
 
@@ -107,9 +105,7 @@ class TqdmLoggingHandler(logging.Handler):
             self.handleError(record)
 
 
-logging.basicConfig(
-    filename="pipeline.log", level=logging.INFO, format="%(message)s"
-)
+logging.basicConfig(filename="pipeline.log", level=logging.INFO, format="%(message)s")
 console_handler = TqdmLoggingHandler()
 console_handler.setFormatter(logging.Formatter("%(message)s"))
 logging.getLogger().addHandler(console_handler)
@@ -127,11 +123,10 @@ def get_device(device: str | None = None) -> str:
 
     print("DEBUG: Environment checks:")
     print(f"  - FORCE_CPU env var: {os.environ.get('FORCE_CPU', 'not set')}")
+    print(f"  - GITHUB_ACTIONS env var: {os.environ.get('GITHUB_ACTIONS', 'not set')}")
     print(
-        f"  - GITHUB_ACTIONS env var: {os.environ.get('GITHUB_ACTIONS', 'not set')}"
-    )
-    print(
-        f"  - AUDIOPIPE_TESTING env var: {os.environ.get('AUDIOPIPE_TESTING', 'not set')}"
+        "  - AUDIOPIPE_TESTING env var: "
+        f"{os.environ.get('AUDIOPIPE_TESTING', 'not set')}"
     )
     print(f"  - CI environment detected: {is_ci}")
 
@@ -145,9 +140,7 @@ def get_device(device: str | None = None) -> str:
 
     # Check available hardware
     cuda_available = torch.cuda.is_available()
-    mps_available = (
-        hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-    )
+    mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
     # Additional CUDA debugging
     if cuda_available:
@@ -162,9 +155,7 @@ def get_device(device: str | None = None) -> str:
             print(f"DEBUG: Error getting CUDA info: {e}")
             cuda_available = False
 
-    mps_available = (
-        hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-    )
+    mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
     print("DEBUG: Hardware availability:")
     print(f"  - CUDA available: {cuda_available}")
@@ -183,7 +174,8 @@ def get_device(device: str | None = None) -> str:
             print("DEBUG: MPS explicitly requested and available")
             return "mps"
         print(
-            f"DEBUG: Requested device '{device}' not available or invalid, falling back to CPU"
+            f"DEBUG: Requested device '{device}' not available or invalid, "
+            "falling back to CPU"
         )
         return "cpu"
 
@@ -238,7 +230,9 @@ def run_command_with_progress(
     seen_messages = set()
 
     while True:
-        reads = [process.stdout, process.stderr]
+        reads = [
+            stream for stream in (process.stdout, process.stderr) if stream is not None
+        ]
         readable, _, _ = select.select(reads, [], [], 0.1)
 
         current_time = time.time()
@@ -298,9 +292,7 @@ def run_command_with_progress(
                 stderr_output.append(remaining_stderr)
                 logging.error(remaining_stderr)
 
-        error_msg = (
-            "\n".join(stderr_output) if stderr_output else "Unknown error"
-        )
+        error_msg = "\n".join(stderr_output) if stderr_output else "Unknown error"
         display.update_log(f"❌ Error: {error_msg}")
         raise RuntimeError(error_msg)
 
@@ -353,12 +345,13 @@ def run_complete_transcription(
     # For CPU mode, we need to use transformers directly
     if actual_device == "cpu":
         print(
-            "DEBUG: Using CPU fallback with transformers (insanely-fast-whisper doesn't support CPU)"
+            "DEBUG: Using CPU fallback with transformers "
+            "(insanely-fast-whisper doesn't support CPU)"
         )
         return run_cpu_transcription(audio_path, language)
-    else:
-        print(f"DEBUG: Using insanely-fast-whisper with {actual_device}")
-        return run_gpu_transcription(audio_path, language, actual_device)
+
+    print(f"DEBUG: Using insanely-fast-whisper with {actual_device}")
+    return run_gpu_transcription(audio_path, language, actual_device)
 
 
 def run_cpu_transcription(
@@ -366,8 +359,8 @@ def run_cpu_transcription(
 ) -> dict[str, Any]:
     """Run Whisper transcription using transformers directly for CPU mode."""
     try:
-        from transformers import pipeline as hf_pipeline
         import librosa
+        from transformers import pipeline as hf_pipeline
 
         print("DEBUG: Loading Whisper model directly with transformers for CPU")
 
@@ -394,8 +387,9 @@ def run_cpu_transcription(
         print("DEBUG: Processing transcription results")
         # Convert to the expected format
         chunks = []
-        if "chunks" in result:
-            for chunk in result["chunks"]:
+        result_data = cast(dict[str, Any], result)
+        if "chunks" in result_data:
+            for chunk in result_data["chunks"]:
                 chunks.append(
                     {
                         "text": chunk["text"].strip(),
@@ -406,7 +400,7 @@ def run_cpu_transcription(
             # Fallback if no chunks
             chunks.append(
                 {
-                    "text": result["text"].strip(),
+                    "text": result_data["text"].strip(),
                     "timestamp": [0.0, len(audio) / sr],
                 }
             )
@@ -416,7 +410,7 @@ def run_cpu_transcription(
 
     except Exception as e:
         print(f"DEBUG: CPU transcription failed: {e}")
-        raise RuntimeError(f"CPU transcription failed: {e}")
+        raise RuntimeError(f"CPU transcription failed: {e}") from e
 
 
 def run_gpu_transcription(
@@ -451,9 +445,7 @@ def run_gpu_transcription(
         cmd.extend(["--device-id", "mps"])
         cmd.extend(["--batch-size", "16"])
     else:
-        raise RuntimeError(
-            f"Unsupported device for insanely-fast-whisper: {device}"
-        )
+        raise RuntimeError(f"Unsupported device for insanely-fast-whisper: {device}")
 
     try:
         result = subprocess.run(
@@ -466,17 +458,15 @@ def run_gpu_transcription(
 
         if os.path.exists(output_json):
             with open(output_json, encoding="utf-8") as f:
-                data = json.load(f)
+                data: dict[str, Any] = json.load(f)
             display.update_progress(
                 f"✅ Whisper completed: {len(data.get('chunks', []))} chunks"
             )
             return data
-        raise RuntimeError(
-            f"Transcription output file not found: {output_json}"
-        )
+        raise RuntimeError(f"Transcription output file not found: {output_json}")
 
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("Whisper transcription timed out")
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("Whisper transcription timed out") from e
     except Exception as e:
         logging.exception(f"Error running Whisper: {e}")
         raise
@@ -554,9 +544,7 @@ def simple_speaker_mapping(
     return mapped_segments
 
 
-def chop_audio(
-    input_audio: str, chunk_duration: int = 900
-) -> list[dict[str, Any]]:
+def chop_audio(input_audio: str, chunk_duration: int = 900) -> list[dict[str, Any]]:
     """Split audio into chunks of specified duration."""
     display.update_progress(
         f"🔪 Chopping audio into {chunk_duration // 60}-minute chunks..."
@@ -623,8 +611,11 @@ def merge_chunk_outputs(
 
 
 def process_single_chunk(
-    chunk_info, num_speakers=None, language=None, device=None
-):
+    chunk_info: dict[str, Any],
+    num_speakers: int | None = None,
+    language: str | None = None,
+    device: str | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Process a single audio chunk through the complete pipeline."""
     chunk_path = chunk_info["path"]
     chunk_index = chunk_info["index"]
@@ -645,9 +636,7 @@ def process_single_chunk(
     whisper_data = run_complete_transcription(vocals_path, language, device)
 
     if not whisper_data or "chunks" not in whisper_data:
-        raise RuntimeError(
-            f"Whisper transcription failed for chunk {chunk_index}"
-        )
+        raise RuntimeError(f"Whisper transcription failed for chunk {chunk_index}")
 
     # Step 5: Simple speaker mapping
     mapped_segments = simple_speaker_mapping(
@@ -658,22 +647,20 @@ def process_single_chunk(
 
 
 def main(
-    input_audio,
-    num_speakers=None,
-    language=None,
-    start_step=1,
-    device=None,
-    chop=False,
-):
+    input_audio: str,
+    num_speakers: int | None = None,
+    language: str | None = None,
+    start_step: int = 1,
+    device: str | None = None,
+    chop: bool = False,
+) -> str:
     """Run the complete pipeline with optional audio chopping."""
     start_time = time.time()
 
     try:
         if chop:
             # Chopped processing mode
-            display.update_progress(
-                "🔪 Running pipeline with audio chopping..."
-            )
+            display.update_progress("🔪 Running pipeline with audio chopping...")
 
             # Step 1: Chop audio into 15-minute chunks
             chunks = chop_audio(input_audio)
@@ -715,19 +702,16 @@ def main(
                 diarization_path = vocals_path.replace(".wav", "_diarized.json")
                 if not os.path.exists(diarization_path):
                     raise FileNotFoundError(
-                        f"Cannot skip to step {start_step}: {diarization_path} not found"
+                        f"Cannot skip to step {start_step}: "
+                        f"{diarization_path} not found"
                     )
 
             with open(diarization_path) as f:
                 diarization_data = json.load(f)
 
             # Step 3: Run complete transcription on audio file
-            display.update_progress(
-                "\n[3/3] Running complete audio transcription"
-            )
-            whisper_data = run_complete_transcription(
-                vocals_path, language, device
-            )
+            display.update_progress("\n[3/3] Running complete audio transcription")
+            whisper_data = run_complete_transcription(vocals_path, language, device)
 
             if not whisper_data or "chunks" not in whisper_data:
                 raise RuntimeError("Whisper transcription failed")
@@ -762,9 +746,7 @@ def main(
         print(f"🔤 Transcribed {len(mapped_segments)} segments")
 
         if mapped_segments:
-            total_duration = (
-                mapped_segments[-1]["end"] - mapped_segments[0]["start"]
-            )
+            total_duration = mapped_segments[-1]["end"] - mapped_segments[0]["start"]
             print(f"⏱️ Total duration: {total_duration:.1f}s")
 
         if chop:
@@ -783,9 +765,7 @@ def main(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="End-to-end audio processing pipeline"
-    )
+    parser = argparse.ArgumentParser(description="End-to-end audio processing pipeline")
     parser.add_argument("input_audio", help="Path to input audio file")
     parser.add_argument(
         "--num-speakers", "-n", type=int, help="Number of speakers (optional)"

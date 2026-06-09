@@ -1,6 +1,5 @@
 import os
 import sys
-import warnings
 from pathlib import Path
 
 import pytest
@@ -48,12 +47,6 @@ def pytest_configure(config):
         print("Using provided Hugging Face token for tests")
     elif os.environ.get("HUGGING_FACE_TOKEN"):
         print("Using Hugging Face token from environment for tests")
-    else:
-        warnings.warn(
-            "No Hugging Face token available. Some tests may be skipped. "
-            "For full testing, provide a token with --hf-token or set HUGGING_FACE_TOKEN environment variable.",
-            stacklevel=2,
-        )
 
 
 def pytest_collection_modifyitems(config, items):

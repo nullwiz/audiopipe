@@ -17,7 +17,7 @@ In the output, you'll get a JSON file with the transcript, speaker labels, and t
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.10+
 - FFmpeg (for audio processing)
 - CUDA-compatible GPU (recommended, but CPU mode available)
 - Hugging Face token (optional, for enhanced speaker diarization accuracy)
