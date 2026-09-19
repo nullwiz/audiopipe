@@ -6,22 +6,23 @@ import os
 import sys
 from typing import Any
 
-import torch
-from pyannote.audio import Pipeline
-
-
-# --- Config
-# Try to get token from environment variable, otherwise use a default message
-HUGGING_FACE_TOKEN = os.environ.get("HUGGING_FACE_TOKEN", None)
-if not HUGGING_FACE_TOKEN:
-    print("⚠️ Warning: HUGGING_FACE_TOKEN environment variable not set.")
-    print("Please set your Hugging Face token as an environment variable:")
-    print("export HUGGING_FACE_TOKEN='your_token_here'")
-    print("Or pass it as an environment variable when running the script:")
-    print("HUGGING_FACE_TOKEN='your_token_here' python diarize.py your_audio.wav")
 
 PIPELINE = "pyannote/speaker-diarization-3.1"
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def get_hf_token() -> str | None:
+    """Token from HUGGING_FACE_TOKEN, falling back to the standard HF_TOKEN."""
+    return os.environ.get("HUGGING_FACE_TOKEN") or os.environ.get("HF_TOKEN") or None
+
+
+def load_pipeline(token: str | None) -> Any:
+    """Load the pyannote pipeline, tolerating the 3.x → 4.x auth kwarg rename."""
+    from pyannote.audio import Pipeline
+
+    try:
+        return Pipeline.from_pretrained(PIPELINE, token=token)
+    except TypeError:
+        return Pipeline.from_pretrained(PIPELINE, use_auth_token=token)
 
 
 def merge_continuous_fragments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -64,6 +65,20 @@ def merge_continuous_fragments(segments: list[dict[str, Any]]) -> list[dict[str,
     return merged_segments
 
 
+def speaker_kwargs(
+    num_speakers: int | None, min_speakers: int | None, max_speakers: int | None
+) -> dict[str, int]:
+    """Only pass the constraints the caller actually gave; pyannote handles the rest."""
+    if num_speakers is not None:
+        return {"num_speakers": num_speakers}
+    kwargs: dict[str, int] = {}
+    if min_speakers is not None:
+        kwargs["min_speakers"] = min_speakers
+    if max_speakers is not None:
+        kwargs["max_speakers"] = max_speakers
+    return kwargs
+
+
 def diarize_audio(
     audio_path: str,
     num_speakers: int | None = None,
@@ -81,42 +96,28 @@ def diarize_audio(
     Returns:
         List of segments with speaker IDs and timestamps
     """
-    print("🎙️ Starting pyannote 3.1 diarization...")
-    print(
-        f"Debug: Using token: {'Available' if HUGGING_FACE_TOKEN else 'NOT AVAILABLE'}"
-    )
+    import torch
+
+    token = get_hf_token()
+    if not token:
+        print(
+            "⚠️ HUGGING_FACE_TOKEN / HF_TOKEN not set; pyannote model download "
+            "will likely fail. Get a token at https://hf.co/settings/tokens",
+            file=sys.stderr,
+        )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"🎙️ Starting pyannote diarization on {device}...")
 
     try:
-        print("🔧 Initializing pyannote speaker-diarization-3.1 pipeline...")
-
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=HUGGING_FACE_TOKEN,
-        )
-
-        print(f"🚀 Moving pipeline to {DEVICE}...")
-        pipeline.to(DEVICE)
+        pipeline = load_pipeline(token)
+        pipeline.to(device)
 
         # Enable TF32 for better performance
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-        # Configure speaker count
-        kwargs = {}
-        if num_speakers is not None:
-            kwargs["num_speakers"] = num_speakers
-            print(f"🎯 Using exact speaker count: {num_speakers}")
-        elif min_speakers is not None or max_speakers is not None:
-            kwargs["min_speakers"] = min_speakers or 4
-            kwargs["max_speakers"] = max_speakers or 10
-            print(
-                f"🎯 Using speaker range: "
-                f"{kwargs['min_speakers']}-{kwargs['max_speakers']}"
-            )
-        else:
-            kwargs["min_speakers"] = 4
-            kwargs["max_speakers"] = 10
-            print("🎯 Using default speaker range: 4-10")
+        kwargs = speaker_kwargs(num_speakers, min_speakers, max_speakers)
+        print(f"🎯 Speaker constraints: {kwargs or 'auto'}")
 
         print("🎙️ Running pyannote diarization (this may take a few minutes)...")
         diarization = pipeline(audio_path, **kwargs)
@@ -146,11 +147,8 @@ def diarize_audio(
         return segments
     except Exception as e:
         print(f"Error in diarize_audio: {e!s}", file=sys.stderr)
-        # Print additional information for debugging
-        print(f"Python version: {sys.version}", file=sys.stderr)
-        print(f"PyTorch version: {torch.__version__}", file=sys.stderr)
-        print(f"Device: {DEVICE}", file=sys.stderr)
-        print(f"Audio path: {audio_path}", file=sys.stderr)
+        print(f"Python {sys.version}; torch {torch.__version__}", file=sys.stderr)
+        print(f"Device: {device}; audio: {audio_path}", file=sys.stderr)
         raise
 
 
@@ -213,7 +211,6 @@ def process_audio_with_diarization(
     max_speakers: int | None = None,
 ) -> str:
     """Main function to process audio with diarization and optional post-processing."""
-    print(f"🚀 Running diarization on {DEVICE}")
     if num_speakers:
         print(f"👥 Using exact number of speakers: {num_speakers}")
     elif min_speakers or max_speakers:

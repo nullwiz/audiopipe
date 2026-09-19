@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
-import platform
-import select
+import queue
 import subprocess
 import sys
+import threading
 import time
-from typing import Any, cast
+from pathlib import Path
+from typing import IO, Any, cast
 
-import torch
 from pydub import AudioSegment
+
+
+HERE = Path(__file__).resolve().parent
+DEFAULT_MODEL = "openai/whisper-large-v3"
 
 
 class RetroDisplay:
@@ -105,117 +110,105 @@ class TqdmLoggingHandler(logging.Handler):
             self.handleError(record)
 
 
-logging.basicConfig(filename="pipeline.log", level=logging.INFO, format="%(message)s")
-console_handler = TqdmLoggingHandler()
-console_handler.setFormatter(logging.Formatter("%(message)s"))
-logging.getLogger().addHandler(console_handler)
+def setup_logging(log_file: str = "pipeline.log") -> None:
+    """Configure file + display logging. Called from the CLI entry, not on import."""
+    logging.basicConfig(filename=log_file, level=logging.INFO, format="%(message)s")
+    console_handler = TqdmLoggingHandler()
+    console_handler.setFormatter(logging.Formatter("%(message)s"))
+    logging.getLogger().addHandler(console_handler)
 
 
 def get_device(device: str | None = None) -> str:
-    """Determine the appropriate device to use for processing."""
-    print(f"DEBUG: get_device called with parameter: {device}")
+    """Determine the appropriate device to use for processing.
 
-    # Check environment variables that might influence device selection
+    Environment short-circuits (FORCE_CPU, CI) are checked before torch is
+    imported so this stays cheap and works without torch installed.
+    """
     force_cpu = os.environ.get("FORCE_CPU") == "1"
-    github_actions = os.environ.get("GITHUB_ACTIONS") == "true"
-    audiopipe_testing = os.environ.get("AUDIOPIPE_TESTING") == "1"
-    is_ci = github_actions or audiopipe_testing
-
-    print("DEBUG: Environment checks:")
-    print(f"  - FORCE_CPU env var: {os.environ.get('FORCE_CPU', 'not set')}")
-    print(f"  - GITHUB_ACTIONS env var: {os.environ.get('GITHUB_ACTIONS', 'not set')}")
-    print(
-        "  - AUDIOPIPE_TESTING env var: "
-        f"{os.environ.get('AUDIOPIPE_TESTING', 'not set')}"
+    is_ci = (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        or os.environ.get("AUDIOPIPE_TESTING") == "1"
     )
-    print(f"  - CI environment detected: {is_ci}")
-
-    # Always return CPU if forced by environment variables
-    if force_cpu or is_ci:
-        print(
-            f"DEBUG: Forcing CPU due to environment settings "
-            f"(FORCE_CPU={force_cpu}, is_ci={is_ci})"
+    if force_cpu or is_ci or device == "cpu":
+        logging.info(
+            "Using device: cpu (FORCE_CPU=%s, CI=%s, requested=%s)",
+            force_cpu,
+            is_ci,
+            device,
         )
         return "cpu"
 
-    # Check available hardware
+    import torch
+
     cuda_available = torch.cuda.is_available()
     mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    logging.debug(
+        "CUDA available: %s, MPS available: %s", cuda_available, mps_available
+    )
 
-    # Additional CUDA debugging
     if cuda_available:
         try:
-            cuda_device_count = torch.cuda.device_count()
-            current_device = torch.cuda.current_device()
-            device_name = torch.cuda.get_device_name(current_device)
-            print(f"DEBUG: CUDA device count: {cuda_device_count}")
-            print(f"DEBUG: Current CUDA device: {current_device}")
-            print(f"DEBUG: CUDA device name: {device_name}")
+            logging.debug(
+                "CUDA device: %s",
+                torch.cuda.get_device_name(torch.cuda.current_device()),
+            )
         except Exception as e:
-            print(f"DEBUG: Error getting CUDA info: {e}")
+            logging.debug("Error getting CUDA info: %s", e)
             cuda_available = False
 
-    mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-
-    print("DEBUG: Hardware availability:")
-    print(f"  - CUDA available: {cuda_available}")
-    print(f"  - MPS available: {mps_available}")
-    print(f"  - Platform: {platform.system()}")
-
-    # If specific device requested
-    if device:
-        if device == "cpu":
-            print("DEBUG: CPU explicitly requested")
-            return "cpu"
-        if device == "cuda" and cuda_available:
-            print("DEBUG: CUDA explicitly requested and available")
-            return "cuda"
-        if device == "mps" and mps_available:
-            print("DEBUG: MPS explicitly requested and available")
-            return "mps"
-        print(
-            f"DEBUG: Requested device '{device}' not available or invalid, "
-            "falling back to CPU"
+    if device == "cuda" and cuda_available:
+        chosen = "cuda"
+    elif device == "mps" and mps_available:
+        chosen = "mps"
+    elif device:
+        logging.warning(
+            "Requested device %r not available, falling back to CPU", device
         )
-        return "cpu"
+        chosen = "cpu"
+    elif cuda_available:
+        chosen = "cuda"
+    elif mps_available:
+        chosen = "mps"
+    else:
+        chosen = "cpu"
 
-    # Auto-select best available device
-    if cuda_available:
-        print("DEBUG: Auto-selecting CUDA (best available)")
-        return "cuda"
-    if mps_available:
-        print("DEBUG: Auto-selecting MPS (best available)")
-        return "mps"
-    print("DEBUG: Auto-selecting CPU (only option available)")
-    return "cpu"
+    logging.info("Using device: %s", chosen)
+    return chosen
 
 
-def run_command_with_progress(
-    cmd: list[str], desc: str, expected_steps: int | None = None
-) -> None:
-    """Run a command and show progress bar."""
+def _pump(stream: IO[str], name: str, out: queue.Queue[tuple[str, str] | None]) -> None:
+    """Read lines from a subprocess stream into the queue; None marks EOF."""
+    for line in iter(stream.readline, ""):
+        out.put((name, line))
+    out.put(None)
+
+
+def run_command_with_progress(cmd: list[str], desc: str) -> None:
+    """Run a command, show a spinner, and route its output to the log/display."""
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        universal_newlines=True,
+        text=True,
         bufsize=1,
     )
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    # Portable (Windows too): one reader thread per pipe instead of select().
+    lines: queue.Queue[tuple[str, str] | None] = queue.Queue()
+    for stream, name in ((process.stdout, "stdout"), (process.stderr, "stderr")):
+        threading.Thread(target=_pump, args=(stream, name, lines), daemon=True).start()
 
     spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-    progress = 0
     start_time = time.time()
-    last_update = start_time
-    stderr_output = []
-
-    # Patterns to filter out spam
+    stderr_output: list[str] = []
     skip_patterns = [
         "configuration:",
         "Voila!",
         "Your file has been transcribed",
         "go check it out",
     ]
-
     important_patterns = [
         "Error:",
         "Warning:",
@@ -225,179 +218,121 @@ def run_command_with_progress(
         "Loading",
         "Initializing",
     ]
+    seen_messages: set[str] = set()
+    open_streams = 2
 
-    # Track seen messages to avoid duplicates
-    seen_messages = set()
+    while open_streams:
+        try:
+            item = lines.get(timeout=0.1)
+        except queue.Empty:
+            item = None
+            got_item = False
+        else:
+            got_item = True
 
-    while True:
-        reads = [
-            stream for stream in (process.stdout, process.stderr) if stream is not None
-        ]
-        readable, _, _ = select.select(reads, [], [], 0.1)
+        elapsed = time.time() - start_time
+        spin_char = spinner[int(time.time() * 10) % len(spinner)]
+        display.update_progress(f"{desc} {spin_char} [{elapsed:.1f}s]")
 
-        current_time = time.time()
+        if not got_item:
+            continue
+        if item is None:
+            open_streams -= 1
+            continue
 
-        if current_time - last_update >= 0.1:
-            elapsed = current_time - start_time
-            if expected_steps:
-                progress = min(int(elapsed * 5), expected_steps)
-                percentage = (progress / expected_steps) * 100
-                bar_length = 30
-                filled = int(bar_length * progress / expected_steps)
-                bar = "█" * filled + "░" * (bar_length - filled)
-                progress_line = (
-                    f"{desc} [{bar}] {percentage:3.0f}% "
-                    f"({progress}/{expected_steps}) [{elapsed:.1f}s]"
-                )
-            else:
-                spin_idx = int(current_time * 10) % len(spinner)
-                spin_char = spinner[spin_idx]
-                progress_line = f"{desc} {spin_char} [{elapsed:.1f}s]"
+        name, output = item
+        output = output.strip()
+        if not output or output in seen_messages:
+            continue
+        if any(pattern in output for pattern in skip_patterns):
+            continue
+        seen_messages.add(output)
 
-            display.update_progress(progress_line)
-            last_update = current_time
+        if name == "stderr":
+            logging.warning(output)
+            stderr_output.append(output)
+        else:
+            logging.info(output)
 
-        for stream in readable:
-            output = stream.readline()
-            if output:
-                output = output.strip()
+        if any(pattern in output for pattern in important_patterns):
+            display.update_log(f"⚠️  {output}" if name == "stderr" else output)
 
-                # Skip duplicate messages and filtered messages
-                if output in seen_messages or any(
-                    pattern in output for pattern in skip_patterns
-                ):
-                    continue
-
-                seen_messages.add(output)
-
-                if stream == process.stderr:
-                    logging.warning(output)
-                    stderr_output.append(output)
-                else:
-                    logging.info(output)
-
-                if any(pattern in output for pattern in important_patterns):
-                    if stream == process.stderr:
-                        display.update_log(f"⚠️  {output}")
-                    else:
-                        display.update_log(output)
-
-        if process.poll() is not None:
-            break
-
+    process.wait()
     if process.returncode != 0:
-        if process.stderr:
-            remaining_stderr = process.stderr.read().strip()
-            if remaining_stderr:
-                stderr_output.append(remaining_stderr)
-                logging.error(remaining_stderr)
-
         error_msg = "\n".join(stderr_output) if stderr_output else "Unknown error"
         display.update_log(f"❌ Error: {error_msg}")
         raise RuntimeError(error_msg)
 
 
-def run_demucs(input_audio: str) -> str:
+def run_demucs(input_audio: str, output_dir: str) -> str:
     """Run demucs separation and get vocals."""
     print("\n[1/3] Running audio separation")
     run_command_with_progress(
-        ["python", "-u", "dem.py", input_audio], "🎵 Separating vocals"
+        [sys.executable, "-u", str(HERE / "dem.py"), input_audio, "-o", output_dir],
+        "🎵 Separating vocals",
     )
-    return "output/combined_vocals.wav"
+    return os.path.join(output_dir, "combined_vocals.wav")
 
 
 def run_diarization(vocals_path: str, num_speakers: int | None = None) -> str:
-    """Run speaker diarization with improved parameters to reduce over-segmentation."""
+    """Run speaker diarization; output JSON lands next to the vocals file."""
     print("\n[2/3] Running speaker diarization")
-    cmd = ["python", "-u", "diarize.py", vocals_path]
-
+    cmd = [sys.executable, "-u", str(HERE / "diarize.py"), vocals_path]
     if num_speakers:
         cmd.extend(["-n", str(num_speakers)])
-    else:
-        cmd.extend(["--min-speakers", "1", "--max-speakers", "8"])
-
     run_command_with_progress(cmd, "🎙️ Diarizing speakers")
     return vocals_path.replace(".wav", "_diarized.json")
 
 
-def extract_audio_segment(
-    audio_path: str, start: float, end: float, output_path: str
-) -> None:
-    """Extract a segment from audio file using pydub."""
-    audio = AudioSegment.from_wav(audio_path)
-    start_ms = int(start * 1000)
-    end_ms = int(end * 1000)
-    segment = audio[start_ms:end_ms]
-    segment.export(output_path, format="wav", parameters=["-y"])
-
-
 def run_complete_transcription(
-    audio_path: str, language: str | None = None, device: str | None = None
+    audio_path: str,
+    language: str | None = None,
+    device: str | None = None,
+    model: str = DEFAULT_MODEL,
+    output_dir: str = "output",
 ) -> dict[str, Any]:
-    """Run Whisper transcription on complete audio file."""
+    """Run Whisper transcription on a complete audio file."""
     display.update_progress("🎙️ Running Whisper on complete audio file...")
-
-    # Determine the actual device to use
     actual_device = get_device(device)
-    print(f"DEBUG: Transcription using device: {actual_device}")
 
     # insanely-fast-whisper only supports CUDA and MPS, not CPU
-    # For CPU mode, we need to use transformers directly
     if actual_device == "cpu":
-        print(
-            "DEBUG: Using CPU fallback with transformers "
-            "(insanely-fast-whisper doesn't support CPU)"
-        )
-        return run_cpu_transcription(audio_path, language)
-
-    print(f"DEBUG: Using insanely-fast-whisper with {actual_device}")
-    return run_gpu_transcription(audio_path, language, actual_device)
+        return run_cpu_transcription(audio_path, language, model)
+    return run_gpu_transcription(audio_path, language, actual_device, model, output_dir)
 
 
 def run_cpu_transcription(
-    audio_path: str, language: str | None = None
+    audio_path: str, language: str | None = None, model: str = DEFAULT_MODEL
 ) -> dict[str, Any]:
     """Run Whisper transcription using transformers directly for CPU mode."""
     try:
         import librosa
+        import torch
         from transformers import pipeline as hf_pipeline
 
-        print("DEBUG: Loading Whisper model directly with transformers for CPU")
-
-        # Load the pipeline with explicit CPU device
+        logging.info("Loading Whisper model %s with transformers (CPU)", model)
         pipe = hf_pipeline(
             "automatic-speech-recognition",
-            model="openai/whisper-large-v3",
+            model=model,
             device=-1,  # Force CPU
             torch_dtype=torch.float32,
         )
 
-        print("DEBUG: Loading audio file")
-        # Load audio file
         audio, sr = librosa.load(audio_path, sr=16000)
 
-        print("DEBUG: Running transcription on CPU")
-        # Run transcription
-        result = pipe(
-            audio,
-            return_timestamps=True,
-            generate_kwargs={"language": language or "en"},
-        )
+        generate_kwargs: dict[str, Any] = {}
+        if language:
+            generate_kwargs["language"] = language
+        result = pipe(audio, return_timestamps=True, generate_kwargs=generate_kwargs)
 
-        print("DEBUG: Processing transcription results")
-        # Convert to the expected format
         chunks = []
         result_data = cast(dict[str, Any], result)
         if "chunks" in result_data:
             for chunk in result_data["chunks"]:
                 chunks.append(
-                    {
-                        "text": chunk["text"].strip(),
-                        "timestamp": chunk["timestamp"],
-                    }
+                    {"text": chunk["text"].strip(), "timestamp": chunk["timestamp"]}
                 )
         else:
-            # Fallback if no chunks
             chunks.append(
                 {
                     "text": result_data["text"].strip(),
@@ -409,84 +344,68 @@ def run_cpu_transcription(
         return {"chunks": chunks}
 
     except Exception as e:
-        print(f"DEBUG: CPU transcription failed: {e}")
         raise RuntimeError(f"CPU transcription failed: {e}") from e
 
 
 def run_gpu_transcription(
-    audio_path: str, language: str | None = None, device: str = "cuda"
+    audio_path: str,
+    language: str | None = None,
+    device: str = "cuda",
+    model: str = DEFAULT_MODEL,
+    output_dir: str = "output",
 ) -> dict[str, Any]:
     """Run Whisper transcription using insanely-fast-whisper for GPU/MPS."""
-    output_json = "output/complete_whisper_transcription.json"
-    os.makedirs("output", exist_ok=True)
+    output_json = os.path.join(output_dir, "complete_whisper_transcription.json")
+    os.makedirs(output_dir, exist_ok=True)
 
     cmd = [
         "insanely-fast-whisper",
         "--file-name",
         audio_path,
         "--model-name",
-        "openai/whisper-large-v3",
+        model,
         "--transcript-path",
         output_json,
     ]
-
     if language:
         cmd.extend(["--language", language])
-    else:
-        cmd.extend(["--language", "en"])
 
-    # Add device configuration
-    if device == "cuda" and torch.cuda.is_available():
-        print("DEBUG: Adding CUDA configuration to Whisper command")
-        cmd.extend(["--device-id", "0"])
-        cmd.extend(["--batch-size", "32"])
+    if device == "cuda":
+        cmd.extend(["--device-id", "0", "--batch-size", "32"])
     elif device == "mps":
-        print("DEBUG: Adding MPS configuration to Whisper command")
-        cmd.extend(["--device-id", "mps"])
-        cmd.extend(["--batch-size", "16"])
+        cmd.extend(["--device-id", "mps", "--batch-size", "16"])
     else:
         raise RuntimeError(f"Unsupported device for insanely-fast-whisper: {device}")
 
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600, check=False
-        )
+    # No timeout: a long podcast on large-v3 can legitimately take a long while.
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        logging.error(f"Whisper transcription failed: {result.stderr}")
+        raise RuntimeError(f"Whisper transcription failed: {result.stderr}")
 
-        if result.returncode != 0:
-            logging.error(f"Whisper transcription failed: {result.stderr}")
-            raise RuntimeError(f"Whisper transcription failed: {result.stderr}")
-
-        if os.path.exists(output_json):
-            with open(output_json, encoding="utf-8") as f:
-                data: dict[str, Any] = json.load(f)
-            display.update_progress(
-                f"✅ Whisper completed: {len(data.get('chunks', []))} chunks"
-            )
-            return data
+    if not os.path.exists(output_json):
         raise RuntimeError(f"Transcription output file not found: {output_json}")
-
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError("Whisper transcription timed out") from e
-    except Exception as e:
-        logging.exception(f"Error running Whisper: {e}")
-        raise
+    with open(output_json, encoding="utf-8") as f:
+        data: dict[str, Any] = json.load(f)
+    display.update_progress(
+        f"✅ Whisper completed: {len(data.get('chunks', []))} chunks"
+    )
+    return data
 
 
 def simple_speaker_mapping(
     whisper_chunks: list[dict[str, Any]],
     diarization_segments: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Simple mapping: for each Whisper chunk, find overlapping diarization segment.
+    """For each Whisper chunk, pick the diarization speaker with the most overlap.
 
-    This could be improved significantly, but for now we just find the best match
-    based on overlap.
+    Falls back to the nearest segment (by centre distance) when nothing overlaps.
     """
     display.update_progress("🔗 Mapping speakers to transcription...")
 
     mapped_segments = []
 
     for chunk in whisper_chunks:
-        # Get chunk timing
         if "timestamp" not in chunk or len(chunk["timestamp"]) != 2:
             continue
 
@@ -498,38 +417,27 @@ def simple_speaker_mapping(
         if not chunk_text:
             continue
 
-        # Find overlapping diarization segment
         best_speaker = None
-        max_overlap = 0
+        max_overlap = 0.0
 
         for diar_seg in diarization_segments:
-            diar_start = diar_seg["start"]
-            diar_end = diar_seg["end"]
+            overlap = min(chunk_end, diar_seg["end"]) - max(
+                chunk_start, diar_seg["start"]
+            )
+            if overlap > max_overlap:
+                max_overlap = overlap
+                best_speaker = diar_seg["speaker"]
 
-            # Calculate overlap
-            overlap_start = max(chunk_start, diar_start)
-            overlap_end = min(chunk_end, diar_end)
-
-            if overlap_start < overlap_end:
-                overlap_duration = overlap_end - overlap_start
-                if overlap_duration > max_overlap:
-                    max_overlap = overlap_duration
-                    best_speaker = diar_seg["speaker"]
-
-        # If no overlap found, find closest segment
         if not best_speaker:
             chunk_center = (chunk_start + chunk_end) / 2
             min_distance = float("inf")
-
             for diar_seg in diarization_segments:
                 diar_center = (diar_seg["start"] + diar_seg["end"]) / 2
                 distance = abs(chunk_center - diar_center)
-
                 if distance < min_distance:
                     min_distance = distance
                     best_speaker = diar_seg["speaker"]
 
-        # Add mapped segment
         if best_speaker:
             mapped_segments.append(
                 {
@@ -544,40 +452,51 @@ def simple_speaker_mapping(
     return mapped_segments
 
 
-def chop_audio(input_audio: str, chunk_duration: int = 900) -> list[dict[str, Any]]:
-    """Split audio into chunks of specified duration."""
+def consolidate_segments(
+    segments: list[dict[str, Any]], max_gap: float = 1.0
+) -> list[dict[str, Any]]:
+    """Merge consecutive same-speaker segments separated by at most max_gap seconds."""
+    out: list[dict[str, Any]] = []
+    for seg in segments:
+        prev = out[-1] if out else None
+        if (
+            prev is not None
+            and prev["speaker"] == seg["speaker"]
+            and seg["start"] - prev["end"] <= max_gap
+        ):
+            prev["text"] = f"{prev['text']} {seg['text']}".strip()
+            prev["end"] = max(prev["end"], seg["end"])
+        else:
+            out.append(dict(seg))
+    return out
+
+
+def chop_audio(
+    input_audio: str, output_dir: str, chunk_duration: int = 900
+) -> list[dict[str, Any]]:
+    """Split audio into chunks of chunk_duration seconds under output_dir/chunks."""
     display.update_progress(
         f"🔪 Chopping audio into {chunk_duration // 60}-minute chunks..."
     )
 
     audio = AudioSegment.from_file(input_audio)
-    total_duration = len(audio) / 1000  # Convert to seconds
+    total_duration = len(audio) / 1000
     chunk_duration_ms = chunk_duration * 1000
+    chunks_dir = os.path.join(output_dir, "chunks")
+    os.makedirs(chunks_dir, exist_ok=True)
 
     chunks = []
-    chunk_paths = []
-
-    for i in range(0, len(audio), chunk_duration_ms):
-        chunk = audio[i : i + chunk_duration_ms]
-        chunk_start_time = i / 1000
-        chunk_end_time = min((i + chunk_duration_ms) / 1000, total_duration)
-
-        # Create chunk filename
-        chunk_filename = f"output/chunk_{i // chunk_duration_ms:03d}.wav"
-        os.makedirs("output", exist_ok=True)
-
-        # Export chunk
-        chunk.export(chunk_filename, format="wav")
-
+    for index, i in enumerate(range(0, len(audio), chunk_duration_ms)):
+        chunk_filename = os.path.join(chunks_dir, f"chunk_{index:03d}.wav")
+        audio[i : i + chunk_duration_ms].export(chunk_filename, format="wav")
         chunks.append(
             {
                 "path": chunk_filename,
-                "start_time": chunk_start_time,
-                "end_time": chunk_end_time,
-                "index": i // chunk_duration_ms,
+                "start_time": i / 1000,
+                "end_time": min((i + chunk_duration_ms) / 1000, total_duration),
+                "index": index,
             }
         )
-        chunk_paths.append(chunk_filename)
 
     display.update_progress(f"✅ Created {len(chunks)} audio chunks")
     return chunks
@@ -586,64 +505,41 @@ def chop_audio(input_audio: str, chunk_duration: int = 900) -> list[dict[str, An
 def merge_chunk_outputs(
     chunk_results: list[tuple[dict[str, Any], list[dict[str, Any]]]],
 ) -> list[dict[str, Any]]:
-    """Merge transcription outputs from multiple chunks into chronological order."""
-    display.update_progress("🔗 Merging chunk transcriptions...")
-
-    all_segments = []
-
-    for chunk_info, segments in chunk_results:
-        chunk_start_offset = chunk_info["start_time"]
-
-        # Adjust timestamps to be relative to original audio
-        for segment in segments:
-            adjusted_segment = segment.copy()
-            adjusted_segment["start"] += chunk_start_offset
-            adjusted_segment["end"] += chunk_start_offset
-            all_segments.append(adjusted_segment)
-
-    # Sort by start time for chronological output
-    all_segments.sort(key=lambda x: x["start"])
-
-    display.update_progress(
-        f"✅ Merged {len(all_segments)} segments from {len(chunk_results)} chunks"
-    )
-    return all_segments
+    """Offset per-chunk Whisper chunks by their chunk start and concatenate in order."""
+    all_chunks: list[dict[str, Any]] = []
+    for chunk_info, whisper_chunks in chunk_results:
+        offset = chunk_info["start_time"]
+        for wc in whisper_chunks:
+            ts = wc.get("timestamp")
+            if not ts or len(ts) != 2 or ts[0] is None or ts[1] is None:
+                continue
+            all_chunks.append({**wc, "timestamp": [ts[0] + offset, ts[1] + offset]})
+    all_chunks.sort(key=lambda c: c["timestamp"][0])
+    return all_chunks
 
 
-def process_single_chunk(
-    chunk_info: dict[str, Any],
-    num_speakers: int | None = None,
-    language: str | None = None,
-    device: str | None = None,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Process a single audio chunk through the complete pipeline."""
-    chunk_path = chunk_info["path"]
-    chunk_index = chunk_info["index"]
-
-    display.update_progress(f"🔄 Processing chunk {chunk_index + 1}...")
-
-    # Step 1: Run demucs on chunk
-    vocals_path = run_demucs(chunk_path)
-
-    # Step 2: Run diarization on chunk vocals
-    diarization_path = run_diarization(vocals_path, num_speakers)
-
-    # Step 3: Load diarization data
-    with open(diarization_path) as f:
-        diarization_data = json.load(f)
-
-    # Step 4: Run complete transcription on chunk vocals
-    whisper_data = run_complete_transcription(vocals_path, language, device)
-
-    if not whisper_data or "chunks" not in whisper_data:
-        raise RuntimeError(f"Whisper transcription failed for chunk {chunk_index}")
-
-    # Step 5: Simple speaker mapping
-    mapped_segments = simple_speaker_mapping(
-        whisper_data["chunks"], diarization_data["segments"]
-    )
-
-    return chunk_info, mapped_segments
+def transcribe_chopped(
+    vocals_path: str,
+    output_dir: str,
+    chunk_minutes: int,
+    language: str | None,
+    device: str | None,
+    model: str,
+) -> list[dict[str, Any]]:
+    """Transcribe vocals in fixed-length chunks and return globally-timed chunks."""
+    chunks = chop_audio(vocals_path, output_dir, chunk_minutes * 60)
+    results: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    for chunk_info in chunks:
+        display.update_progress(
+            f"🔄 Transcribing chunk {chunk_info['index'] + 1}/{len(chunks)}..."
+        )
+        data = run_complete_transcription(
+            chunk_info["path"], language, device, model, output_dir
+        )
+        if not data or "chunks" not in data:
+            raise RuntimeError(f"Whisper failed for chunk {chunk_info['index']}")
+        results.append((chunk_info, data["chunks"]))
+    return merge_chunk_outputs(results)
 
 
 def main(
@@ -653,105 +549,74 @@ def main(
     start_step: int = 1,
     device: str | None = None,
     chop: bool = False,
+    output_dir: str = "output",
+    model: str = DEFAULT_MODEL,
+    chunk_minutes: int = 15,
+    consolidate: bool = True,
 ) -> str:
-    """Run the complete pipeline with optional audio chopping."""
+    """Run the complete pipeline: separate → diarize → transcribe → map speakers."""
     start_time = time.time()
+    os.makedirs(output_dir, exist_ok=True)
 
     try:
-        if chop:
-            # Chopped processing mode
-            display.update_progress("🔪 Running pipeline with audio chopping...")
-
-            # Step 1: Chop audio into 15-minute chunks
-            chunks = chop_audio(input_audio)
-
-            # Step 2: Process each chunk
-            chunk_results = []
-            for chunk_info in chunks:
-                try:
-                    chunk_info, segments = process_single_chunk(
-                        chunk_info, num_speakers, language, device
-                    )
-                    chunk_results.append((chunk_info, segments))
-                except Exception as e:
-                    logging.warning(
-                        f"Failed to process chunk {chunk_info['index']}: {e}"
-                    )
-                    continue
-
-            if not chunk_results:
-                raise RuntimeError("No chunks were successfully processed")
-
-            # Step 3: Merge chunk outputs
-            mapped_segments = merge_chunk_outputs(chunk_results)
-
+        if start_step <= 1:
+            vocals_path = run_demucs(input_audio, output_dir)
         else:
-            # Standard single-file processing mode
-            if start_step <= 1:
-                vocals_path = run_demucs(input_audio)
-            else:
-                vocals_path = "output/combined_vocals.wav"
-                if not os.path.exists(vocals_path):
-                    raise FileNotFoundError(
-                        f"Cannot skip to step {start_step}: {vocals_path} not found"
-                    )
+            vocals_path = os.path.join(output_dir, "combined_vocals.wav")
+            if not os.path.exists(vocals_path):
+                raise FileNotFoundError(
+                    f"Cannot skip to step {start_step}: {vocals_path} not found"
+                )
 
-            if start_step <= 2:
-                diarization_path = run_diarization(vocals_path, num_speakers)
-            else:
-                diarization_path = vocals_path.replace(".wav", "_diarized.json")
-                if not os.path.exists(diarization_path):
-                    raise FileNotFoundError(
-                        f"Cannot skip to step {start_step}: "
-                        f"{diarization_path} not found"
-                    )
+        if start_step <= 2:
+            diarization_path = run_diarization(vocals_path, num_speakers)
+        else:
+            diarization_path = vocals_path.replace(".wav", "_diarized.json")
+            if not os.path.exists(diarization_path):
+                raise FileNotFoundError(
+                    f"Cannot skip to step {start_step}: {diarization_path} not found"
+                )
 
-            with open(diarization_path) as f:
-                diarization_data = json.load(f)
+        with open(diarization_path) as f:
+            diarization_data = json.load(f)
 
-            # Step 3: Run complete transcription on audio file
-            display.update_progress("\n[3/3] Running complete audio transcription")
-            whisper_data = run_complete_transcription(vocals_path, language, device)
-
+        display.update_progress("\n[3/3] Running transcription")
+        if chop:
+            whisper_chunks = transcribe_chopped(
+                vocals_path, output_dir, chunk_minutes, language, device, model
+            )
+        else:
+            whisper_data = run_complete_transcription(
+                vocals_path, language, device, model, output_dir
+            )
             if not whisper_data or "chunks" not in whisper_data:
                 raise RuntimeError("Whisper transcription failed")
+            whisper_chunks = whisper_data["chunks"]
 
-            # Step 4: Simple speaker mapping
-            display.update_progress("Mapping speakers to transcription...")
-            mapped_segments = simple_speaker_mapping(
-                whisper_data["chunks"], diarization_data["segments"]
-            )
+        mapped_segments = simple_speaker_mapping(
+            whisper_chunks, diarization_data["segments"]
+        )
+        if not mapped_segments:
+            raise RuntimeError("No segments could be mapped to speakers")
+        mapped_segments.sort(key=lambda x: x["start"])
+        if consolidate:
+            mapped_segments = consolidate_segments(mapped_segments)
 
-            if not mapped_segments:
-                raise RuntimeError("No segments could be mapped to speakers")
-
-            # Sort by start time for chronological output
-            mapped_segments.sort(key=lambda x: x["start"])
-
-        # Save final output (same for both modes)
-        output_path = os.path.join("output", "final_transcription.json")
-        output_data = {"segments": mapped_segments}
-
+        output_path = os.path.join(output_dir, "final_transcription.json")
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(output_data, f, indent=2, ensure_ascii=False)
+            json.dump({"segments": mapped_segments}, f, indent=2, ensure_ascii=False)
 
         elapsed_time = time.time() - start_time
-
-        # Get speaker count from mapped segments
-        unique_speakers = list({seg["speaker"] for seg in mapped_segments})
+        unique_speakers = sorted({seg["speaker"] for seg in mapped_segments})
 
         print(f"\n✨ Pipeline complete in {elapsed_time:.1f}s!")
         print(f"📝 Output saved to: {output_path}")
         print(f"📊 Found {len(unique_speakers)} speakers: {unique_speakers}")
         print(f"🔤 Transcribed {len(mapped_segments)} segments")
-
-        if mapped_segments:
-            total_duration = mapped_segments[-1]["end"] - mapped_segments[0]["start"]
-            print(f"⏱️ Total duration: {total_duration:.1f}s")
-
+        total_duration = mapped_segments[-1]["end"] - mapped_segments[0]["start"]
+        print(f"⏱️ Total duration: {total_duration:.1f}s")
         if chop:
-            print("🔪 Processed using audio chopping mode")
-
+            print(f"🔪 Transcribed in {chunk_minutes}-minute chunks")
         print("\nCheck pipeline.log for detailed logs")
         return output_path
 
@@ -762,9 +627,8 @@ def main(
         raise
 
 
-if __name__ == "__main__":
-    import argparse
-
+def cli(argv: list[str] | None = None) -> None:
+    """Command-line entry point."""
     parser = argparse.ArgumentParser(description="End-to-end audio processing pipeline")
     parser.add_argument("input_audio", help="Path to input audio file")
     parser.add_argument(
@@ -773,7 +637,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--language",
         "-l",
-        help="Language code for transcription (e.g. 'en', 'es', 'fr')",
+        help="Language code for transcription (e.g. 'en'); auto-detected if omitted",
     )
     parser.add_argument(
         "--start-step",
@@ -790,14 +654,35 @@ if __name__ == "__main__":
         help="Device to use for processing (auto-detected if not specified)",
     )
     parser.add_argument(
+        "--output-dir", "-o", default="output", help="Directory for all outputs"
+    )
+    parser.add_argument(
+        "--model",
+        "-m",
+        default=DEFAULT_MODEL,
+        help=f"Whisper model (default {DEFAULT_MODEL}; "
+        "openai/whisper-large-v3-turbo is much faster on CPU)",
+    )
+    parser.add_argument(
         "--chop",
         "-c",
         action="store_true",
-        help="Split input audio into 15-minute chunks for processing "
-        "(useful for very long audio files)",
+        help="Transcribe in fixed-length chunks (useful for very long audio files)",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--chunk-minutes",
+        type=int,
+        default=15,
+        help="Chunk length in minutes when using --chop (default 15)",
+    )
+    parser.add_argument(
+        "--no-consolidate",
+        action="store_true",
+        help="Keep raw Whisper chunks instead of merging consecutive same-speaker ones",
+    )
+    args = parser.parse_args(argv)
 
+    setup_logging()
     main(
         args.input_audio,
         args.num_speakers,
@@ -805,4 +690,12 @@ if __name__ == "__main__":
         args.start_step,
         args.device,
         args.chop,
+        args.output_dir,
+        args.model,
+        args.chunk_minutes,
+        not args.no_consolidate,
     )
+
+
+if __name__ == "__main__":
+    cli()

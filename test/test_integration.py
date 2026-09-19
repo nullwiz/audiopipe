@@ -3,15 +3,13 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-import torch
 
 
-def is_mps_available():
-    """Check if MPS (Metal Performance Shaders) is available."""
-    return torch.backends.mps.is_available()
+HERE = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +44,7 @@ def setup_test_env():
 
 def _run_audio_separation(test_input: Path) -> Path:
     result = subprocess.run(
-        ["python", "dem.py", str(test_input)],
+        [sys.executable, str(HERE / "dem.py"), str(test_input)],
         capture_output=True,
         text=True,
         check=False,
@@ -93,7 +91,7 @@ def test_diarization(setup_test_env):
 
     # Run diarization with 2 speakers
     result = subprocess.run(
-        ["python", "diarize.py", str(vocals_path), "--num-speakers", "2"],
+        [sys.executable, str(HERE / "diarize.py"), str(vocals_path), "-n", "2"],
         capture_output=True,
         text=True,
         check=False,
@@ -139,7 +137,7 @@ def test_transcription(setup_test_env):
     print(f"GITHUB_ACTIONS={os.environ.get('GITHUB_ACTIONS', 'not set')}")
 
     # Run the full pipeline with start-step 3 (transcription only) and force CPU mode
-    cmd = ["python", "pipeline.py", str(setup_test_env), "--start-step", "3"]
+    cmd = [sys.executable, str(HERE / "pipeline.py"), str(setup_test_env), "-s", "3"]
     print(f"Running command: {' '.join(cmd)}")
 
     result = subprocess.run(
@@ -209,8 +207,8 @@ def test_full_pipeline(setup_test_env):
 
     # Run the full pipeline with explicit CPU device
     cmd = [
-        "python",
-        "pipeline.py",
+        sys.executable,
+        str(HERE / "pipeline.py"),
         str(setup_test_env),
         "--num-speakers",
         "2",

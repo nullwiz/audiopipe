@@ -13,6 +13,7 @@ In the output, you'll get a JSON file with the transcript, speaker labels, and t
 - **Post-processing**: Consolidate transcripts for readability
 - **Clean Display**: Real-time progress updates without cluttering the console
 - **Step Skipping**: Start the pipeline from any step
+- **Chunked Transcription**: `--chop` transcribes long audio in fixed-length pieces with globally consistent speaker labels
 - **Cross-platform**: Supports Windows, macOS, and Linux
 
 ## Requirements
@@ -29,11 +30,20 @@ In the output, you'll get a JSON file with the transcript, speaker labels, and t
 git clone https://github.com/nullwiz/audiopipe.git
 cd audiopipe
 
-# Install dependencies
+# Install as a package (gives you the `audiopipe` command)
+pip install -e .
+
+# or just the runtime dependencies for running the scripts directly
 pip install -r requirements.txt
 
 # For macOS (with Homebrew)
 brew install ffmpeg
+```
+
+Set a Hugging Face token so pyannote can download its models (either name works):
+
+```bash
+export HUGGING_FACE_TOKEN=hf_...   # or HF_TOKEN=hf_...
 ```
 
 ## Usage
@@ -49,9 +59,14 @@ python pipeline.py input.mp3 --start-step 3  # Skip to transcription step
 # Optional parameters:
 python pipeline.py input.mp3 --num-speakers 3 --language en
 
-# For very long audio files (>1 hour), use chopping mode:
-python pipeline.py input.mp3 --chop  # Splits into 15-minute chunks for processing
+# Write everything somewhere else and use a faster model on CPU:
+python pipeline.py input.mp3 -o runs/ep01 --model openai/whisper-large-v3-turbo
+
+# For very long audio files (>1 hour), transcribe in chunks:
+python pipeline.py input.mp3 --chop --chunk-minutes 10
 ```
+
+`audiopipe ...` is equivalent to `python pipeline.py ...` after `pip install -e .`.
 
 ## Pipeline Steps
 
@@ -70,8 +85,10 @@ The process consists of three main steps that can be run together or separately:
 3. **Transcription** (Step 3): Converts complete audio to text, then maps speakers
    - Input: `output/combined_vocals.wav` and diarization data
    - Output: `output/final_transcription.json`
-   - Architecture: Complete audio transcription → speaker mapping (no chunking)
-   - Tip: Specify `--language` code for improved accuracy
+   - Architecture: Whisper on the whole file (or on `--chunk-minutes` pieces with `--chop`) → speaker mapping → consolidation of consecutive same-speaker segments (disable with `--no-consolidate`)
+   - Tip: `--language` skips Whisper's auto-detection; `--model openai/whisper-large-v3-turbo` is much faster on CPU
+
+With `--chop`, separation and diarization still run once on the full audio, so speaker labels stay consistent across chunks; only Whisper is run per chunk and the timestamps are offset back into the global timeline.
 
 ## Output Files Explained
 
@@ -107,33 +124,15 @@ The pipeline creates several files during processing, all stored in the `output/
   }
   ```
 
-### Temporary Directories
-- **`separated/`**: Intermediate files from audio separation (preserved for resuming)
-- **`chunks/`**: Audio chunks when using `--chop` mode (preserved for debugging)
+### Temporary Directories (inside the output directory)
+- **`separated/`**: Intermediate stems from Demucs
+- **`demucs_chunks/`**: Input pieces when a large file is chunked before separation
+- **`chunks/`**: Vocals pieces when using `--chop`
 
 ### Resuming from Steps
 The presence of these files allows the pipeline to resume from different steps:
 - If `combined_vocals.wav` exists, audio separation can be skipped (step 1)
 - If `combined_vocals_diarized.json` exists, diarization can be skipped (step 2)
-
-## Visualization Tools
-
-AudioPipe includes tools to visualize your transcripts and generate interactive reports:
-
-```bash
-# Generate timeline visualization for transcript
-python visualize.py transcript output/final_transcription.json
-
-# Generate interactive HTML report with audio playback
-python visualize.py report output/final_transcription.json --audio output/combined_vocals.wav
-
-# Visualize raw diarization (speaker timeline)
-python visualize.py diarization output/combined_vocals_diarized.json
-```
-
-For best results:
-1. Use the HTML report for interactive exploration of longer content
-2. For very long audio (>1 hour), use `--chop` mode for processing
 
 ## Supported File Formats
 
@@ -152,17 +151,21 @@ Arguments:
 
 Options:
   --num-speakers, -n INT     Number of speakers (optional, auto-detected if not specified)
-  --language, -l STRING      Language code for transcription (e.g., 'en', 'es', 'fr')
+  --language, -l STRING      Language code for transcription (auto-detected if omitted)
   --start-step, -s [1-3]     Start from step: 1=separation, 2=diarization, 3=transcription
-  --chop, -c                 Split input audio into 15-minute chunks for processing
   --device, -d [cpu|cuda|mps] Device to use for processing (auto-detected if not specified)
+  --output-dir, -o DIR       Directory for all outputs (default: output)
+  --model, -m NAME           Whisper model (default: openai/whisper-large-v3)
+  --chop, -c                 Transcribe in fixed-length chunks
+  --chunk-minutes INT        Chunk length for --chop (default: 15)
+  --no-consolidate           Keep raw Whisper chunks; don't merge same-speaker runs
   --help                     Show this help message
 ```
 
 ### dem.py (Audio Separation - removes background noise)
 
 ```
-python dem.py INPUT_FILE
+python dem.py INPUT_FILE [--device cpu|cuda|mps] [--vocals-only] [-o DIR]
 
 Arguments:
   INPUT_FILE                 Path to input audio/video file
@@ -177,8 +180,12 @@ Arguments:
   INPUT_AUDIO                Path to vocals audio file (usually output/combined_vocals.wav)
 
 Options:
-  --num-speakers, -n INT     Number of speakers (optional, auto-detected if not specified)
+  --num-speakers, -n INT     Exact number of speakers
+  --min-speakers INT         Lower bound (optional)
+  --max-speakers INT         Upper bound (optional)
 ```
+
+Without any of these, pyannote picks the speaker count itself.
 
 ## macOS Support
 
@@ -251,24 +258,17 @@ The final output is a JSON file with chronological segments:
 
 ## Testing
 
-The project includes a test suite for validating the pipeline functionality:
-
 ```bash
-# Run basic integration tests
-python -m pytest test/test_integration.py -v --integration
+pip install -r requirements-dev.txt
 
-# Run full pipeline test (slower)
-python -m pytest test/test_integration.py::test_full_pipeline -v --integration --runslow
+# Fast unit tests (no models, no torch needed)
+pytest
+
+# Integration tests: real Demucs / pyannote / Whisper runs on test/data/
+pytest test/test_integration.py -v --integration
+
+# Full pipeline end to end (slow)
+pytest test/test_integration.py::test_full_pipeline -v --integration --runslow
 ```
 
-
-- **Full Pipeline Test**: Use `--runslow` to run the complete pipeline test
-- **Hugging Face Token**: For full testing, provide your token with `--hf-token` or set the `HUGGING_FACE_TOKEN` environment variable
-
-For more details on Testing, check [README.test.md](README.test.md).
-
-
-
-## Known bugs
-- Transcription searching stopped working at some point
-- Some buttons are not working on the visualization page
+Integration tests need `HUGGING_FACE_TOKEN` (or `--hf-token`). See [README.test.md](README.test.md).

@@ -8,17 +8,18 @@ The project consists of the following key files:
 
 ```
 audiopipe/
-├── .github/workflows/      # CI/CD configurations
-│   └── test.yml            # GitHub Actions workflow for testing
-├── pipeline.py             # Main orchestration script
-├── dem.py                  # Audio separation module
-├── diarize.py              # Speaker diarization module
-├── process_transcript.py   # Post-processing for consolidation
-├── test/                   # Test directory
-│   ├── test_integration.py # Integration tests
-│   └── data/               # Test data files
-├── conftest.py             # Pytest configuration
-├── requirements.txt        # Python dependencies
+├── .github/workflows/      # CI: lint + unit on every push, integration on dispatch/weekly
+│   └── ci.yml
+├── pipeline.py             # Main orchestration script (also the `audiopipe` entry point)
+├── dem.py                  # Audio separation (Demucs)
+├── diarize.py              # Speaker diarization (pyannote)
+├── test/
+│   ├── conftest.py         # Pytest options (--integration, --runslow, --hf-token)
+│   ├── test_unit.py        # Fast tests of pure logic; run by default
+│   ├── test_integration.py # Real model runs; need --integration
+│   └── data/               # Test audio
+├── requirements.txt        # Runtime dependencies
+├── requirements-dev.txt    # + pytest, ruff, mypy
 ├── README.md               # Project documentation
 ├── README.test.md          # Testing documentation
 ├── CONTRIBUTING.md         # Contribution guidelines
@@ -37,30 +38,31 @@ audiopipe/
 
 2. Install dependencies:
    ```bash
-   pip install -r requirements.txt
-   pip install pytest pytest-cov edge-tts  # For testing
+   pip install -r requirements-dev.txt
    ```
 
 3. Set up your Hugging Face token:
    ```bash
-   export HUGGING_FACE_TOKEN='your_token_here'
+   export HUGGING_FACE_TOKEN='your_token_here'   # HF_TOKEN also works
    ```
 
 ## Testing
 
-Before submitting a pull request, please run the test suite:
+Before submitting a pull request:
 
 ```bash
-# Run integration tests
-python -m pytest test/test_integration.py -v --integration
-
-# Run all tests including slow ones (if you have time)
-python -m pytest test/test_integration.py -v --integration --runslow
+ruff check . && ruff format --check .
+mypy --config-file mypy.ini dem.py diarize.py pipeline.py
+pytest                                              # unit tests, seconds
+pytest test/test_integration.py -v --integration    # real models, minutes
 ```
+
+CI runs lint + unit tests on every push to `master`; integration tests run weekly and on manual dispatch.
 
 ## Environment Variables
 
-- `HUGGING_FACE_TOKEN`: Required for speaker diarization (pyannote.audio)
+- `HUGGING_FACE_TOKEN` / `HF_TOKEN`: Required for speaker diarization (pyannote.audio)
+- `FORCE_CPU=1`: Skip GPU detection entirely
 
 ## Pull Request Process
 
@@ -74,7 +76,5 @@ python -m pytest test/test_integration.py -v --integration --runslow
 
 ## Coding Style
 
-- Follow PEP 8 guidelines
-- Include docstrings for functions and classes
-- Keep comments concise and meaningful
-- Use type hints where appropriate
+- `ruff format` is the formatter; `ruff check` and strict `mypy` must pass
+- Keep pure logic importable without torch (import heavy deps inside functions) so unit tests stay fast

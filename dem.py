@@ -3,19 +3,14 @@ from __future__ import annotations
 import argparse
 import glob
 import os
-import platform
 import shutil
 import subprocess
 
-import torch
 from pydub import AudioSegment
 
 
 # Config
-CHUNKS_DIR = "chunks"
-INPUT_DIR = "input"
 OUTPUT_DIR = "output"
-SEPARATED_DIR = os.path.join("separated")
 MODEL = "htdemucs"
 STEM = "vocals"
 MAX_FILE_SIZE_MB = 60  # Maximum file size to process as a single unit
@@ -24,31 +19,27 @@ CHUNK_DURATION_SECONDS = 15 * 60
 
 def get_device(device: str | None = None) -> str:
     """Determine the appropriate device to use."""
-    if device:
-        if device == "cpu":
-            return "cpu"
-        if device == "cuda" and torch.cuda.is_available():
-            return "cuda"
-        if (
-            device == "mps"
-            and hasattr(torch.backends, "mps")
-            and torch.backends.mps.is_available()
-        ):
-            return "mps"
+    if device == "cpu":
+        return "cpu"
 
-    if torch.cuda.is_available():
+    import torch
+
+    cuda = torch.cuda.is_available()
+    mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    if device == "cuda" and cuda:
         return "cuda"
-    if (
-        platform.system() == "Darwin"
-        and hasattr(torch.backends, "mps")
-        and torch.backends.mps.is_available()
-    ):
+    if device == "mps" and mps:
         return "mps"
-    return "cpu"
+    if device:
+        print(f"⚠️ Requested device {device!r} not available, using CPU")
+        return "cpu"
+    return "cuda" if cuda else "mps" if mps else "cpu"
 
 
-def run_demucs_on_chunk(chunk_path: str, device: str | None = None) -> None:
-    """Run demucs on a single audio chunk."""
+def run_demucs_on_chunk(
+    chunk_path: str, separated_dir: str, device: str | None = None
+) -> None:
+    """Run demucs on a single audio chunk, writing stems under separated_dir."""
     device_arg = get_device(device)
     command = [
         "demucs",
@@ -58,19 +49,21 @@ def run_demucs_on_chunk(chunk_path: str, device: str | None = None) -> None:
         STEM,
         "--device",
         device_arg,
+        "-o",
+        separated_dir,
         chunk_path,
     ]
     print(f"🔊 Processing chunk: {chunk_path} (using {device_arg})")
     subprocess.run(command, check=True)
 
 
-def split_audio_into_chunks(input_file: str) -> list[str]:
+def split_audio_into_chunks(input_file: str, chunks_dir: str) -> list[str]:
     """Split a large input into WAV chunks for lower-memory Demucs runs."""
-    if os.path.exists(CHUNKS_DIR):
-        shutil.rmtree(CHUNKS_DIR)
-    os.makedirs(CHUNKS_DIR, exist_ok=True)
+    if os.path.exists(chunks_dir):
+        shutil.rmtree(chunks_dir)
+    os.makedirs(chunks_dir, exist_ok=True)
 
-    output_pattern = os.path.join(CHUNKS_DIR, "chunk_%03d.wav")
+    output_pattern = os.path.join(chunks_dir, "chunk_%03d.wav")
     command = [
         "ffmpeg",
         "-y",
@@ -93,7 +86,7 @@ def split_audio_into_chunks(input_file: str) -> list[str]:
     print(f"✂️ Splitting large file into {CHUNK_DURATION_SECONDS // 60}-minute chunks")
     subprocess.run(command, check=True)
 
-    chunks = sorted(glob.glob(os.path.join(CHUNKS_DIR, "chunk_*.wav")))
+    chunks = sorted(glob.glob(os.path.join(chunks_dir, "chunk_*.wav")))
     if not chunks:
         raise RuntimeError(f"No chunks created for {input_file}")
     return chunks
@@ -111,7 +104,7 @@ def recombine_stems(stem_path_pattern: str, output_path: str) -> None:
     for p in parts:
         print(f"   - {p}")
 
-    concat_list_file = "combine_list.txt"
+    concat_list_file = output_path + ".concat.txt"
     with open(concat_list_file, "w") as f:
         for part in parts:
             f.write(f"file '{os.path.abspath(part)}'\n")
@@ -170,17 +163,23 @@ def combine_with_pydub(parts: list[str], output_path: str) -> None:
 
 
 def process_input_file(
-    input_file: str, device: str | None = None, vocals_only: bool = False
+    input_file: str,
+    device: str | None = None,
+    vocals_only: bool = False,
+    output_dir: str = OUTPUT_DIR,
 ) -> str:
-    """Process a single input file."""
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    """Separate one input file; all outputs and scratch dirs live under output_dir."""
+    separated_dir = os.path.join(output_dir, "separated")
+    chunks_dir = os.path.join(output_dir, "demucs_chunks")
+
+    os.makedirs(output_dir, exist_ok=True)
     for output_name in ("combined_vocals.wav", "combined_background.wav"):
-        output_path = os.path.join(OUTPUT_DIR, output_name)
+        output_path = os.path.join(output_dir, output_name)
         if os.path.exists(output_path):
             os.remove(output_path)
 
-    if os.path.exists(SEPARATED_DIR):
-        shutil.rmtree(SEPARATED_DIR)
+    if os.path.exists(separated_dir):
+        shutil.rmtree(separated_dir)
 
     # Check file size
     file_size_mb = os.path.getsize(input_file) / (1024 * 1024)
@@ -189,30 +188,30 @@ def process_input_file(
             f"🔍 File is under {MAX_FILE_SIZE_MB}MB ({file_size_mb:.1f}MB), "
             "processing as a single unit"
         )
-        run_demucs_on_chunk(input_file, device)
+        run_demucs_on_chunk(input_file, separated_dir, device)
     else:
         print(
             f"🔍 File is over {MAX_FILE_SIZE_MB}MB ({file_size_mb:.1f}MB), "
             "chunking before separation"
         )
-        for chunk in split_audio_into_chunks(input_file):
-            run_demucs_on_chunk(chunk, device)
+        for chunk in split_audio_into_chunks(input_file, chunks_dir):
+            run_demucs_on_chunk(chunk, separated_dir, device)
 
-    track_folder = os.path.join(SEPARATED_DIR, MODEL)
+    track_folder = os.path.join(separated_dir, MODEL)
 
     recombine_stems(
         os.path.join(track_folder, "*", "vocals.wav"),
-        os.path.join(OUTPUT_DIR, "combined_vocals.wav"),
+        os.path.join(output_dir, "combined_vocals.wav"),
     )
 
     if not vocals_only:
         recombine_stems(
             os.path.join(track_folder, "*", "no_vocals.wav"),
-            os.path.join(OUTPUT_DIR, "combined_background.wav"),
+            os.path.join(output_dir, "combined_background.wav"),
         )
 
-    print("✅ Done! Separated and recombined audio saved in:", OUTPUT_DIR)
-    return os.path.join(OUTPUT_DIR, "combined_vocals.wav")
+    print("✅ Done! Separated and recombined audio saved in:", output_dir)
+    return os.path.join(output_dir, "combined_vocals.wav")
 
 
 if __name__ == "__main__":
@@ -231,6 +230,9 @@ if __name__ == "__main__":
         action="store_true",
         help="Only recombine the vocals stem; skip the background output",
     )
+    parser.add_argument(
+        "--output-dir", "-o", default=OUTPUT_DIR, help="Directory for all outputs"
+    )
     args = parser.parse_args()
 
-    process_input_file(args.input_file, args.device, args.vocals_only)
+    process_input_file(args.input_file, args.device, args.vocals_only, args.output_dir)

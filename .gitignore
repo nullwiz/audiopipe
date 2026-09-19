@@ -4,7 +4,7 @@ output/*
 separated/
 *_diarized.json
 final_transcription*.json
-combine_list.txt
+*.concat.txt
 sources/
 
 # Logs

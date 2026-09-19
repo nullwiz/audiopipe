@@ -4,12 +4,14 @@ This document provides comprehensive guidance on testing the AudioPipe project.
 
 ## Test Structure
 
-The project uses pytest and includes integration tests:
+The project uses pytest and has two layers:
 
-1. **Integration Tests**
-   - Located in `test/test_integration.py`
-   - Test the complete pipeline with real audio processing
-   - Use real audio samples in `test/data/`
+1. **Unit Tests** (`test/test_unit.py`)
+   - Pure logic: speaker mapping, segment consolidation, chunk merging, subprocess runner
+   - Need only `pytest` and `pydub`; run by default
+2. **Integration Tests** (`test/test_integration.py`)
+   - Real Demucs / pyannote / Whisper runs on `test/data/`
+   - Need the full `requirements.txt`, ffmpeg, and `--integration`
 
 ## Running Tests
 
@@ -18,7 +20,7 @@ The project uses pytest and includes integration tests:
 For convenience, use the provided shell script:
 
 ```bash
-# Run the safe default test pass
+# Unit tests only
 ./run_tests.sh
 
 # Include integration tests
@@ -64,32 +66,12 @@ Here are some common issues you might encounter with tests:
 - **Missing token**: If the `HUGGING_FACE_TOKEN` is not available, the diarization tests will be skipped
 - If ffmpeg is not installed, audio processing tests will fail
 - Set environment variables as needed: `export PYTORCH_ENABLE_MPS_FALLBACK=1`
-- The transcription step is the most resource-intensive and may fail on limited hardware
+- The transcription step is the most resource-intensive and may fail on limited hardware; `FORCE_CPU=1` is set by CI
 
 ## Continuous Integration
 
 The project includes a GitHub Actions workflow for automated testing:
 
-- Integration tests run on every push
-- Full pipeline tests can be run manually
-- See `.github/workflows/test.yml` for details 
-
-## Visualizing Results
-
-The project includes `visualize.py` for analyzing pipeline outputs:
-
-```bash
-# Generate waveform visualization
-python visualize.py waveform input.mp3
-
-# Create speaker diarization timeline
-python visualize.py diarization output/combined_vocals_diarized.json
-
-# Visualize transcript
-python visualize.py transcript output/final_transcription.json
-
-# Create interactive HTML report (most useful)
-python visualize.py report output/final_transcription.json --audio output/combined_vocals.wav
-```
-
-Each command accepts a `--output` parameter to specify the output file location.
+- Lint, mypy, and unit tests run on every push and PR to `master`
+- Integration tests run weekly and via "Run workflow" (needs the `HUGGING_FACE_TOKEN` secret)
+- See `.github/workflows/ci.yml`
