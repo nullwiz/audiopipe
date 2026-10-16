@@ -1067,3 +1067,55 @@ body {
   background-color: var(--terminal-button-hover);
   border-color: var(--terminal-accent);
 }
+
+/* Local transcription panel */
+.run-panel {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--terminal-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  font-size: 0.9em;
+}
+
+.run-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.run-field {
+  background: var(--terminal-input-bg);
+  color: var(--terminal-fg);
+  border: 1px solid var(--terminal-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+}
+
+.terminal-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.run-status {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.run-status a,
+.run-status code {
+  color: var(--terminal-accent);
+}
+
+.run-status.ok { color: var(--terminal-success); opacity: 1; }
+.run-status.busy { color: var(--terminal-warning); opacity: 1; }
+.run-status.error { color: var(--terminal-error); opacity: 1; }

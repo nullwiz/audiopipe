@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "audiopipe"
-version = "0.2.0"
-description = "End-to-end audio processing pipeline with speaker diarization and transcription"
+version = "0.3.0"
+description = "Local speaker diarization and transcription with NVIDIA Nemotron models"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -22,10 +22,7 @@ classifiers = [
 dependencies = [
     "torch>=2.0.0",
     "torchaudio>=2.0.0",
-    "torchcodec>=0.14.0",
-    "pyannote.audio>=2.1.1",
-    "insanely-fast-whisper>=0.0.9",
-    "transformers>=4.40.0",
+    "transformers>=5.20.0",
     "pydub>=0.25.1",
     "demucs>=4.0.0",
     "numpy>=1.22.0",
@@ -39,9 +36,10 @@ dev = ["pytest>=7.0.0", "pytest-timeout>=2.1.0", "ruff>=0.1.0", "mypy>=1.0.0"]
 
 [project.scripts]
 audiopipe = "pipeline:cli"
+audiopipe-serve = "server:cli"
 
 [tool.setuptools]
-py-modules = ["pipeline", "dem", "diarize"]
+py-modules = ["pipeline", "dem", "diarize", "server"]
 
 [tool.ruff]
 line-length = 88
@@ -84,7 +82,6 @@ show_error_codes = true
 module = [
     "torch.*",
     "torchaudio.*",
-    "pyannote.*",
     "demucs.*",
     "pydub.*",
     "librosa.*",

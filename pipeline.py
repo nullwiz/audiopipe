@@ -10,13 +10,12 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import IO, Any, cast
-
-from pydub import AudioSegment
+from typing import IO, Any
 
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_MODEL = "openai/whisper-large-v3"
+DEFAULT_MODEL = "nvidia/nemotron-3.5-asr-streaming-0.6b"
+SR = 16000
 
 
 class RetroDisplay:
@@ -264,192 +263,113 @@ def run_command_with_progress(cmd: list[str], desc: str) -> None:
         raise RuntimeError(error_msg)
 
 
-def run_demucs(input_audio: str, output_dir: str) -> str:
+def run_demucs(input_audio: str, output_dir: str, device: str) -> str:
     """Run demucs separation and get vocals."""
     print("\n[1/3] Running audio separation")
     run_command_with_progress(
-        [sys.executable, "-u", str(HERE / "dem.py"), input_audio, "-o", output_dir],
+        [
+            sys.executable,
+            "-u",
+            str(HERE / "dem.py"),
+            input_audio,
+            "-o",
+            output_dir,
+            "-d",
+            device,
+        ],
         "🎵 Separating vocals",
     )
     return os.path.join(output_dir, "combined_vocals.wav")
 
 
-def run_diarization(vocals_path: str, num_speakers: int | None = None) -> str:
+def convert_to_wav(input_audio: str, output_dir: str) -> str:
+    """Skip separation: just decode the input to 16 kHz mono as the 'vocals'."""
+    print("\n[1/3] Skipping separation, converting input to 16 kHz mono")
+    out = os.path.join(output_dir, "combined_vocals.wav")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            input_audio,
+            "-ac",
+            "1",
+            "-ar",
+            str(SR),
+            out,
+        ],
+        check=True,
+    )
+    return out
+
+
+def run_diarization(
+    vocals_path: str, device: str, num_speakers: int | None = None
+) -> str:
     """Run speaker diarization; output JSON lands next to the vocals file."""
     print("\n[2/3] Running speaker diarization")
-    cmd = [sys.executable, "-u", str(HERE / "diarize.py"), vocals_path]
+    cmd = [sys.executable, "-u", str(HERE / "diarize.py"), vocals_path, "-d", device]
     if num_speakers:
         cmd.extend(["-n", str(num_speakers)])
     run_command_with_progress(cmd, "🎙️ Diarizing speakers")
     return vocals_path.replace(".wav", "_diarized.json")
 
 
-def run_complete_transcription(
-    audio_path: str,
-    language: str | None = None,
-    device: str | None = None,
+def batched(order: list[int], size: int) -> list[list[int]]:
+    return [order[i : i + size] for i in range(0, len(order), size)]
+
+
+def transcribe_segments(
+    audio: Any,
+    segments: list[dict[str, Any]],
     model: str = DEFAULT_MODEL,
-    output_dir: str = "output",
-) -> dict[str, Any]:
-    """Run Whisper transcription on a complete audio file."""
-    display.update_progress("🎙️ Running Whisper on complete audio file...")
-    actual_device = get_device(device)
+    language: str | None = None,
+    device: str = "cpu",
+    batch_size: int = 8,
+) -> list[str]:
+    """Transcribe each diarized segment's audio; returns one text per segment.
 
-    # insanely-fast-whisper only supports CUDA and MPS, not CPU
-    if actual_device == "cpu":
-        return run_cpu_transcription(audio_path, language, model)
-    return run_gpu_transcription(audio_path, language, actual_device, model, output_dir)
+    Nemotron ASR by default; any model id containing "whisper" goes through the
+    transformers Whisper pipeline instead (more languages, slower).
+    """
+    clips = [audio[int(s["start"] * SR) : int(s["end"] * SR)] for s in segments]
+    # longest first and similar lengths together → less padding per batch
+    order = sorted(range(len(clips)), key=lambda i: -len(clips[i]))
+    texts = [""] * len(clips)
+    batches = batched(order, batch_size)
 
-
-def run_cpu_transcription(
-    audio_path: str, language: str | None = None, model: str = DEFAULT_MODEL
-) -> dict[str, Any]:
-    """Run Whisper transcription using transformers directly for CPU mode."""
-    try:
-        import librosa
-        import torch
+    if "whisper" in model.lower():
         from transformers import pipeline as hf_pipeline
 
-        logging.info("Loading Whisper model %s with transformers (CPU)", model)
-        pipe = hf_pipeline(
-            "automatic-speech-recognition",
-            model=model,
-            device=-1,  # Force CPU
-            torch_dtype=torch.float32,
-        )
+        pipe = hf_pipeline("automatic-speech-recognition", model=model, device=device)
+        kwargs = {"language": language, "task": "transcribe"} if language else {}
+        for n, idx in enumerate(batches, 1):
+            display.update_progress(f"🔤 Transcribing batch {n}/{len(batches)}...")
+            batch: Any = [clips[i] for i in idx]
+            out = pipe(batch, batch_size=len(idx), generate_kwargs=kwargs)
+            for i, r in zip(idx, out, strict=True):
+                texts[i] = " ".join(r["text"].split())
+        return texts
 
-        audio, sr = librosa.load(audio_path, sr=16000)
+    import torch
+    from transformers import AutoModelForRNNT, AutoProcessor
 
-        generate_kwargs: dict[str, Any] = {}
-        if language:
-            generate_kwargs["language"] = language
-        result = pipe(audio, return_timestamps=True, generate_kwargs=generate_kwargs)
-
-        chunks = []
-        result_data = cast(dict[str, Any], result)
-        if "chunks" in result_data:
-            for chunk in result_data["chunks"]:
-                chunks.append(
-                    {"text": chunk["text"].strip(), "timestamp": chunk["timestamp"]}
-                )
-        else:
-            chunks.append(
-                {
-                    "text": result_data["text"].strip(),
-                    "timestamp": [0.0, len(audio) / sr],
-                }
-            )
-
-        display.update_progress(f"✅ Whisper completed: {len(chunks)} chunks")
-        return {"chunks": chunks}
-
-    except Exception as e:
-        raise RuntimeError(f"CPU transcription failed: {e}") from e
-
-
-def run_gpu_transcription(
-    audio_path: str,
-    language: str | None = None,
-    device: str = "cuda",
-    model: str = DEFAULT_MODEL,
-    output_dir: str = "output",
-) -> dict[str, Any]:
-    """Run Whisper transcription using insanely-fast-whisper for GPU/MPS."""
-    output_json = os.path.join(output_dir, "complete_whisper_transcription.json")
-    os.makedirs(output_dir, exist_ok=True)
-
-    cmd = [
-        "insanely-fast-whisper",
-        "--file-name",
-        audio_path,
-        "--model-name",
-        model,
-        "--transcript-path",
-        output_json,
-    ]
-    if language:
-        cmd.extend(["--language", language])
-
-    if device == "cuda":
-        cmd.extend(["--device-id", "0", "--batch-size", "32"])
-    elif device == "mps":
-        cmd.extend(["--device-id", "mps", "--batch-size", "16"])
-    else:
-        raise RuntimeError(f"Unsupported device for insanely-fast-whisper: {device}")
-
-    # No timeout: a long podcast on large-v3 can legitimately take a long while.
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        logging.error(f"Whisper transcription failed: {result.stderr}")
-        raise RuntimeError(f"Whisper transcription failed: {result.stderr}")
-
-    if not os.path.exists(output_json):
-        raise RuntimeError(f"Transcription output file not found: {output_json}")
-    with open(output_json, encoding="utf-8") as f:
-        data: dict[str, Any] = json.load(f)
-    display.update_progress(
-        f"✅ Whisper completed: {len(data.get('chunks', []))} chunks"
-    )
-    return data
-
-
-def simple_speaker_mapping(
-    whisper_chunks: list[dict[str, Any]],
-    diarization_segments: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """For each Whisper chunk, pick the diarization speaker with the most overlap.
-
-    Falls back to the nearest segment (by centre distance) when nothing overlaps.
-    """
-    display.update_progress("🔗 Mapping speakers to transcription...")
-
-    mapped_segments = []
-
-    for chunk in whisper_chunks:
-        if "timestamp" not in chunk or len(chunk["timestamp"]) != 2:
-            continue
-
-        chunk_start, chunk_end = chunk["timestamp"]
-        if chunk_start is None or chunk_end is None:
-            continue
-
-        chunk_text = chunk.get("text", "").strip()
-        if not chunk_text:
-            continue
-
-        best_speaker = None
-        max_overlap = 0.0
-
-        for diar_seg in diarization_segments:
-            overlap = min(chunk_end, diar_seg["end"]) - max(
-                chunk_start, diar_seg["start"]
-            )
-            if overlap > max_overlap:
-                max_overlap = overlap
-                best_speaker = diar_seg["speaker"]
-
-        if not best_speaker:
-            chunk_center = (chunk_start + chunk_end) / 2
-            min_distance = float("inf")
-            for diar_seg in diarization_segments:
-                diar_center = (diar_seg["start"] + diar_seg["end"]) / 2
-                distance = abs(chunk_center - diar_center)
-                if distance < min_distance:
-                    min_distance = distance
-                    best_speaker = diar_seg["speaker"]
-
-        if best_speaker:
-            mapped_segments.append(
-                {
-                    "text": chunk_text,
-                    "start": round(chunk_start, 3),
-                    "end": round(chunk_end, 3),
-                    "speaker": best_speaker,
-                }
-            )
-
-    display.update_progress(f"✅ Mapped {len(mapped_segments)} segments")
-    return mapped_segments
+    processor = AutoProcessor.from_pretrained(model)
+    net = AutoModelForRNNT.from_pretrained(model).to(device)
+    net.eval()
+    for n, idx in enumerate(batches, 1):
+        display.update_progress(f"🔤 Transcribing batch {n}/{len(batches)}...")
+        inputs = processor(
+            [clips[i] for i in idx], sampling_rate=SR, language=language or "auto"
+        ).to(device, dtype=net.dtype)
+        with torch.inference_mode():
+            ids = net.generate(**inputs, return_dict_in_generate=True).sequences
+        decoded = processor.batch_decode(ids, skip_special_tokens=True)
+        for i, text in zip(idx, decoded, strict=True):
+            texts[i] = " ".join(text.split())
+    return texts
 
 
 def consolidate_segments(
@@ -471,75 +391,13 @@ def consolidate_segments(
     return out
 
 
-def chop_audio(
-    input_audio: str, output_dir: str, chunk_duration: int = 900
-) -> list[dict[str, Any]]:
-    """Split audio into chunks of chunk_duration seconds under output_dir/chunks."""
-    display.update_progress(
-        f"🔪 Chopping audio into {chunk_duration // 60}-minute chunks..."
+def to_text(segments: list[dict[str, Any]]) -> str:
+    """Readable transcript: one '[hh:mm:ss] SPEAKER: text' line per segment."""
+    return "".join(
+        f"[{time.strftime('%H:%M:%S', time.gmtime(s['start']))}] "
+        f"{s['speaker']}: {s['text']}\n"
+        for s in segments
     )
-
-    audio = AudioSegment.from_file(input_audio)
-    total_duration = len(audio) / 1000
-    chunk_duration_ms = chunk_duration * 1000
-    chunks_dir = os.path.join(output_dir, "chunks")
-    os.makedirs(chunks_dir, exist_ok=True)
-
-    chunks = []
-    for index, i in enumerate(range(0, len(audio), chunk_duration_ms)):
-        chunk_filename = os.path.join(chunks_dir, f"chunk_{index:03d}.wav")
-        audio[i : i + chunk_duration_ms].export(chunk_filename, format="wav")
-        chunks.append(
-            {
-                "path": chunk_filename,
-                "start_time": i / 1000,
-                "end_time": min((i + chunk_duration_ms) / 1000, total_duration),
-                "index": index,
-            }
-        )
-
-    display.update_progress(f"✅ Created {len(chunks)} audio chunks")
-    return chunks
-
-
-def merge_chunk_outputs(
-    chunk_results: list[tuple[dict[str, Any], list[dict[str, Any]]]],
-) -> list[dict[str, Any]]:
-    """Offset per-chunk Whisper chunks by their chunk start and concatenate in order."""
-    all_chunks: list[dict[str, Any]] = []
-    for chunk_info, whisper_chunks in chunk_results:
-        offset = chunk_info["start_time"]
-        for wc in whisper_chunks:
-            ts = wc.get("timestamp")
-            if not ts or len(ts) != 2 or ts[0] is None or ts[1] is None:
-                continue
-            all_chunks.append({**wc, "timestamp": [ts[0] + offset, ts[1] + offset]})
-    all_chunks.sort(key=lambda c: c["timestamp"][0])
-    return all_chunks
-
-
-def transcribe_chopped(
-    vocals_path: str,
-    output_dir: str,
-    chunk_minutes: int,
-    language: str | None,
-    device: str | None,
-    model: str,
-) -> list[dict[str, Any]]:
-    """Transcribe vocals in fixed-length chunks and return globally-timed chunks."""
-    chunks = chop_audio(vocals_path, output_dir, chunk_minutes * 60)
-    results: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
-    for chunk_info in chunks:
-        display.update_progress(
-            f"🔄 Transcribing chunk {chunk_info['index'] + 1}/{len(chunks)}..."
-        )
-        data = run_complete_transcription(
-            chunk_info["path"], language, device, model, output_dir
-        )
-        if not data or "chunks" not in data:
-            raise RuntimeError(f"Whisper failed for chunk {chunk_info['index']}")
-        results.append((chunk_info, data["chunks"]))
-    return merge_chunk_outputs(results)
 
 
 def main(
@@ -548,19 +406,23 @@ def main(
     language: str | None = None,
     start_step: int = 1,
     device: str | None = None,
-    chop: bool = False,
     output_dir: str = "output",
     model: str = DEFAULT_MODEL,
-    chunk_minutes: int = 15,
     consolidate: bool = True,
+    separate: bool = True,
 ) -> str:
-    """Run the complete pipeline: separate → diarize → transcribe → map speakers."""
+    """Run the complete pipeline: separate → diarize → transcribe each turn."""
     start_time = time.time()
     os.makedirs(output_dir, exist_ok=True)
+    device = get_device(device)
 
     try:
         if start_step <= 1:
-            vocals_path = run_demucs(input_audio, output_dir)
+            vocals_path = (
+                run_demucs(input_audio, output_dir, device)
+                if separate
+                else convert_to_wav(input_audio, output_dir)
+            )
         else:
             vocals_path = os.path.join(output_dir, "combined_vocals.wav")
             if not os.path.exists(vocals_path):
@@ -569,7 +431,7 @@ def main(
                 )
 
         if start_step <= 2:
-            diarization_path = run_diarization(vocals_path, num_speakers)
+            diarization_path = run_diarization(vocals_path, device, num_speakers)
         else:
             diarization_path = vocals_path.replace(".wav", "_diarized.json")
             if not os.path.exists(diarization_path):
@@ -578,66 +440,66 @@ def main(
                 )
 
         with open(diarization_path) as f:
-            diarization_data = json.load(f)
+            turns = json.load(f)["segments"]
+        if not turns:
+            raise RuntimeError("Diarization found no speech")
 
-        display.update_progress("\n[3/3] Running transcription")
-        if chop:
-            whisper_chunks = transcribe_chopped(
-                vocals_path, output_dir, chunk_minutes, language, device, model
-            )
-        else:
-            whisper_data = run_complete_transcription(
-                vocals_path, language, device, model, output_dir
-            )
-            if not whisper_data or "chunks" not in whisper_data:
-                raise RuntimeError("Whisper transcription failed")
-            whisper_chunks = whisper_data["chunks"]
+        print(f"\n[3/3] Transcribing {len(turns)} turns with {model}")
+        from diarize import load_audio
 
-        mapped_segments = simple_speaker_mapping(
-            whisper_chunks, diarization_data["segments"]
+        texts = transcribe_segments(
+            load_audio(vocals_path), turns, model, language, device
         )
-        if not mapped_segments:
-            raise RuntimeError("No segments could be mapped to speakers")
-        mapped_segments.sort(key=lambda x: x["start"])
+        segments = [
+            {"text": text, **turn}
+            for turn, text in zip(turns, texts, strict=True)
+            if text
+        ]
+        if not segments:
+            raise RuntimeError("Transcription produced no text")
         if consolidate:
-            mapped_segments = consolidate_segments(mapped_segments)
+            segments = consolidate_segments(segments)
 
         output_path = os.path.join(output_dir, "final_transcription.json")
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump({"segments": mapped_segments}, f, indent=2, ensure_ascii=False)
+            json.dump({"segments": segments}, f, indent=2, ensure_ascii=False)
+        text_path = os.path.join(output_dir, "final_transcription.txt")
+        with open(text_path, "w", encoding="utf-8") as f:
+            f.write(to_text(segments))
 
-        elapsed_time = time.time() - start_time
-        unique_speakers = sorted({seg["speaker"] for seg in mapped_segments})
-
-        print(f"\n✨ Pipeline complete in {elapsed_time:.1f}s!")
-        print(f"📝 Output saved to: {output_path}")
-        print(f"📊 Found {len(unique_speakers)} speakers: {unique_speakers}")
-        print(f"🔤 Transcribed {len(mapped_segments)} segments")
-        total_duration = mapped_segments[-1]["end"] - mapped_segments[0]["start"]
-        print(f"⏱️ Total duration: {total_duration:.1f}s")
-        if chop:
-            print(f"🔪 Transcribed in {chunk_minutes}-minute chunks")
-        print("\nCheck pipeline.log for detailed logs")
+        speakers = sorted({seg["speaker"] for seg in segments})
+        print(f"\n✨ Pipeline complete in {time.time() - start_time:.1f}s!")
+        print(f"📝 Output saved to: {output_path} and {text_path}")
+        print(f"📊 Found {len(speakers)} speakers: {speakers}")
+        print(f"🔤 Transcribed {len(segments)} segments")
+        print("\nCheck pipeline.log in the output directory for details")
         return output_path
 
     except Exception as e:
         logging.exception("Pipeline failed")
         print(f"\n❌ Pipeline failed: {e}")
-        print("📝 Check pipeline.log for detailed logs")
+        print("📝 Check pipeline.log in the output directory for details")
         raise
 
 
 def cli(argv: list[str] | None = None) -> None:
     """Command-line entry point."""
-    parser = argparse.ArgumentParser(description="End-to-end audio processing pipeline")
-    parser.add_argument("input_audio", help="Path to input audio file")
+    parser = argparse.ArgumentParser(
+        description="Local speaker diarization + transcription pipeline"
+    )
+    parser.add_argument("input_audio", help="Path to input audio/video file")
     parser.add_argument(
-        "--num-speakers", "-n", type=int, help="Number of speakers (optional)"
+        "--num-speakers",
+        "-n",
+        type=int,
+        choices=range(1, 9),
+        metavar="1-8",
+        help="Number of speakers, if known (the diarizer tracks up to 8)",
     )
     parser.add_argument(
         "--language",
         "-l",
-        help="Language code for transcription (e.g. 'en'); auto-detected if omitted",
+        help="Language code (e.g. 'en', 'de-DE'); auto-detected if omitted",
     )
     parser.add_argument(
         "--start-step",
@@ -645,7 +507,7 @@ def cli(argv: list[str] | None = None) -> None:
         type=int,
         choices=[1, 2, 3],
         default=1,
-        help="Start from step: 1=demucs, 2=diarization, 3=transcription",
+        help="Start from step: 1=separation, 2=diarization, 3=transcription",
     )
     parser.add_argument(
         "--device",
@@ -660,40 +522,40 @@ def cli(argv: list[str] | None = None) -> None:
         "--model",
         "-m",
         default=DEFAULT_MODEL,
-        help=f"Whisper model (default {DEFAULT_MODEL}; "
-        "openai/whisper-large-v3-turbo is much faster on CPU)",
+        help=f"ASR model (default {DEFAULT_MODEL}); any Whisper checkpoint such "
+        "as openai/whisper-large-v3-turbo also works, for 99 languages",
     )
     parser.add_argument(
-        "--chop",
-        "-c",
+        "--no-separation",
         action="store_true",
-        help="Transcribe in fixed-length chunks (useful for very long audio files)",
+        help="Skip Demucs vocal separation (faster; fine for clean speech)",
     )
     parser.add_argument(
-        "--chunk-minutes",
-        type=int,
-        default=15,
-        help="Chunk length in minutes when using --chop (default 15)",
+        "--offline",
+        action="store_true",
+        help="Never touch the network; models must already be downloaded",
     )
     parser.add_argument(
         "--no-consolidate",
         action="store_true",
-        help="Keep raw Whisper chunks instead of merging consecutive same-speaker ones",
+        help="Keep one segment per diarized turn instead of merging same-speaker runs",
     )
     args = parser.parse_args(argv)
 
-    setup_logging()
+    if args.offline:  # inherited by the separation/diarization subprocesses too
+        os.environ["HF_HUB_OFFLINE"] = "1"
+    os.makedirs(args.output_dir, exist_ok=True)
+    setup_logging(os.path.join(args.output_dir, "pipeline.log"))
     main(
         args.input_audio,
         args.num_speakers,
         args.language,
         args.start_step,
         args.device,
-        args.chop,
         args.output_dir,
         args.model,
-        args.chunk_minutes,
         not args.no_consolidate,
+        not args.no_separation,
     )
 
 

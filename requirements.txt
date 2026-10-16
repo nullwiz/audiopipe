@@ -1,9 +1,6 @@
 torch>=2.0.0
 torchaudio>=2.0.0
-torchcodec>=0.14.0
-pyannote.audio>=2.1.1
-insanely-fast-whisper>=0.0.9
-transformers>=4.40.0
+transformers>=5.20.0
 pydub>=0.25.1
 demucs>=4.0.0
 numpy>=1.22.0

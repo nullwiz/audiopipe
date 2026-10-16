@@ -2,82 +2,63 @@
 
 import sys
 
+import numpy as np
 import pytest
 
 import diarize
 import pipeline
+import server
 
 
-def test_mapping_overlap_wins():
-    diar = [
-        {"speaker": "A", "start": 0.0, "end": 5.0},
-        {"speaker": "B", "start": 5.0, "end": 10.0},
-    ]
-    chunks = [
-        {"text": "hi", "timestamp": [4.0, 7.0]},  # 1s in A, 2s in B
-        {"text": "yo", "timestamp": [0.5, 4.5]},  # all A
-    ]
-    out = pipeline.simple_speaker_mapping(chunks, diar)
-    assert [(s["speaker"], s["text"]) for s in out] == [("B", "hi"), ("A", "yo")]
+def probs(*runs):
+    """Build (frames, 8) probabilities from (speaker, seconds) runs; None = silence."""
+    rows = []
+    for spk, sec in runs:
+        row = np.zeros(8)
+        if spk is not None:
+            row[spk] = 0.9
+        rows += [row] * round(sec / diarize.FRAME_SEC)
+    return np.array(rows)
 
 
-def test_mapping_no_overlap_falls_back_to_nearest():
-    diar = [
-        {"speaker": "A", "start": 0.0, "end": 1.0},
-        {"speaker": "B", "start": 20.0, "end": 21.0},
-    ]
-    out = pipeline.simple_speaker_mapping([{"text": "x", "timestamp": [18, 19]}], diar)
-    assert out[0]["speaker"] == "B"
+def spans(segments):
+    return [(s["speaker"][-1], s["start"], s["end"]) for s in segments]
 
 
-def test_mapping_skips_empty_and_none():
-    diar = [{"speaker": "A", "start": 0.0, "end": 10.0}]
-    chunks = [
-        {"text": "   ", "timestamp": [0, 1]},
-        {"text": "ok", "timestamp": [1, None]},
-        {"text": "ok", "timestamp": [1]},
-        {"text": "keep", "timestamp": [2, 3]},
-    ]
-    out = pipeline.simple_speaker_mapping(chunks, diar)
-    assert [s["text"] for s in out] == ["keep"]
-    assert out[0]["start"] == 2 and out[0]["end"] == 3
-
-
-def test_merge_chunk_outputs_offsets_and_sorts():
-    results = [
-        ({"start_time": 900.0}, [{"text": "b", "timestamp": [1.0, 2.0]}]),
-        (
-            {"start_time": 0.0},
-            [
-                {"text": "a", "timestamp": [5.0, 6.0]},
-                {"text": "bad", "timestamp": None},
-            ],
-        ),
-    ]
-    out = pipeline.merge_chunk_outputs(results)
-    assert [c["text"] for c in out] == ["a", "b"]
-    assert out[1]["timestamp"] == [901.0, 902.0]
-
-
-def test_merge_continuous_fragments():
-    segs = [
-        {"speaker": "A", "start": 0.0, "end": 1.0},
-        {"speaker": "B", "start": 1.5, "end": 2.0},
-        {"speaker": "A", "start": 2.5, "end": 3.0},  # gap 1.5 from A → merge
-        {"speaker": "A", "start": 6.0, "end": 7.0},  # gap 3.0 → no merge
-    ]
-    out = diarize.merge_continuous_fragments(segs)
-    assert out == [
-        {"speaker": "A", "start": 0.0, "end": 3.0},
-        {"speaker": "B", "start": 1.5, "end": 2.0},
-        {"speaker": "A", "start": 6.0, "end": 7.0},
+def test_probs_to_segments_turns_and_merging():
+    p = probs((0, 2), (None, 0.5), (0, 1), (1, 3), (None, 2), (1, 1))
+    # A's 0.5 s pause merges; B's 2 s pause exceeds max_gap and splits
+    assert spans(diarize.probs_to_segments(p)) == [
+        ("0", 0.0, 3.5),
+        ("1", 3.5, 6.5),
+        ("1", 8.5, 9.5),
     ]
 
 
-def test_speaker_kwargs_passes_only_what_was_given():
-    assert diarize.speaker_kwargs(None, None, None) == {}
-    assert diarize.speaker_kwargs(2, 1, 8) == {"num_speakers": 2}
-    assert diarize.speaker_kwargs(None, None, 8) == {"max_speakers": 8}
+def test_probs_to_segments_overlap_goes_to_most_likely_speaker():
+    p = probs((0, 2), (1, 2))
+    p[150:200, 1] = 0.6  # B starts talking over A, but A is louder there
+    assert spans(diarize.probs_to_segments(p)) == [("0", 0.0, 2.0), ("1", 2.0, 4.0)]
+
+
+def test_probs_to_segments_drops_blips_and_rejoins():
+    p = probs((0, 2), (1, 0.1), (0, 2))
+    assert spans(diarize.probs_to_segments(p)) == [("0", 0.0, 4.1)]
+
+
+def test_probs_to_segments_num_speakers_reassigns_extras():
+    p = probs((0, 2), (2, 1), (1, 2))
+    p[200:300, 1] = 0.3  # spurious third speaker; B is the runner-up
+    out = diarize.probs_to_segments(p, num_speakers=2)
+    assert spans(out) == [("0", 0.0, 2.0), ("1", 2.0, 5.0)]
+
+
+def test_probs_to_segments_caps_length_at_least_confident_frame():
+    p = probs((0, 70))
+    p[2500, 0] = 0.55  # the dip inside the [20 s, 30 s] cut window
+    out = diarize.probs_to_segments(p, max_len=30)
+    assert spans(out) == [("0", 0.0, 25.0), ("0", 25.0, 45.0), ("0", 45.0, 70.0)]
+    assert diarize.probs_to_segments(np.zeros((0, 8))) == []
 
 
 def test_consolidate_segments():
@@ -117,3 +98,31 @@ def test_get_device_force_cpu_does_not_import_torch(monkeypatch):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("AUDIOPIPE_TESTING", raising=False)
     assert pipeline.get_device("cpu") == "cpu"
+
+
+def test_to_text_and_batched():
+    segs = [{"speaker": "SPEAKER_00", "start": 3725.4, "end": 3726, "text": "hi"}]
+    assert pipeline.to_text(segs) == "[01:02:05] SPEAKER_00: hi\n"
+    assert pipeline.batched([5, 4, 3, 2, 1], 2) == [[5, 4], [3, 2], [1]]
+
+
+def test_server_origin_allowlist():
+    assert server.origin_allowed(None)
+    assert server.origin_allowed("https://nullwiz.github.io")
+    assert server.origin_allowed("http://127.0.0.1:8765")
+    assert server.origin_allowed("http://localhost:3000")
+    assert not server.origin_allowed("https://evil.example")
+    assert not server.origin_allowed("http://localhost.evil.example")
+
+
+def test_server_parse_options():
+    opts = server.parse_options("num_speakers=2&language=de&separate=0&filename=a.MP3")
+    assert opts == {
+        "num_speakers": 2,
+        "language": "de",
+        "separate": False,
+        "suffix": ".mp3",
+    }
+    assert server.parse_options("filename=../../x.s;h")["suffix"] == ""
+    with pytest.raises(ValueError):
+        server.parse_options("num_speakers=9")

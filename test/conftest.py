@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 
@@ -21,13 +20,6 @@ def pytest_addoption(parser):
         "--runslow", action="store_true", default=False, help="run slow tests"
     )
 
-    # Add option to set HF token
-    parser.addoption(
-        "--hf-token",
-        action="store",
-        help="Hugging Face token for API access during tests",
-    )
-
 
 def pytest_configure(config):
     """Register markers for our tests."""
@@ -36,17 +28,6 @@ def pytest_configure(config):
         "integration: mark test as requiring integration with external systems",
     )
     config.addinivalue_line("markers", "slow: mark test as slow")
-    config.addinivalue_line(
-        "markers", "requires_token: mark test as requiring Hugging Face token"
-    )
-
-    # Set Hugging Face token if provided
-    hf_token = config.getoption("--hf-token")
-    if hf_token:
-        os.environ["HUGGING_FACE_TOKEN"] = hf_token
-        print("Using provided Hugging Face token for tests")
-    elif os.environ.get("HUGGING_FACE_TOKEN"):
-        print("Using Hugging Face token from environment for tests")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -64,17 +45,3 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "slow" in item.keywords:
                 item.add_marker(skip_slow)
-
-    # Skip token-requiring tests if no token is provided
-    if not os.environ.get("HUGGING_FACE_TOKEN"):
-        skip_token = pytest.mark.skip(reason="need Hugging Face token to run")
-        for item in items:
-            if "requires_token" in item.keywords:
-                item.add_marker(skip_token)
-
-
-@pytest.fixture
-def has_hf_token():
-    """Fixture to check if Hugging Face token is available."""
-    token = os.environ.get("HUGGING_FACE_TOKEN")
-    return token is not None

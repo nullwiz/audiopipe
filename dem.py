@@ -5,6 +5,7 @@ import glob
 import os
 import shutil
 import subprocess
+import sys
 
 from pydub import AudioSegment
 
@@ -42,6 +43,8 @@ def run_demucs_on_chunk(
     """Run demucs on a single audio chunk, writing stems under separated_dir."""
     device_arg = get_device(device)
     command = [
+        sys.executable,
+        "-m",
         "demucs",
         "-n",
         MODEL,

@@ -12,9 +12,9 @@ audiopipe/
 │   └── ci.yml
 ├── pipeline.py             # Main orchestration script (also the `audiopipe` entry point)
 ├── dem.py                  # Audio separation (Demucs)
-├── diarize.py              # Speaker diarization (pyannote)
+├── diarize.py              # Speaker diarization (NVIDIA Nemotron 3 Diarization)
 ├── test/
-│   ├── conftest.py         # Pytest options (--integration, --runslow, --hf-token)
+│   ├── conftest.py         # Pytest options (--integration, --runslow)
 │   ├── test_unit.py        # Fast tests of pure logic; run by default
 │   ├── test_integration.py # Real model runs; need --integration
 │   └── data/               # Test audio
@@ -41,18 +41,13 @@ audiopipe/
    pip install -r requirements-dev.txt
    ```
 
-3. Set up your Hugging Face token:
-   ```bash
-   export HUGGING_FACE_TOKEN='your_token_here'   # HF_TOKEN also works
-   ```
-
 ## Testing
 
 Before submitting a pull request:
 
 ```bash
 ruff check . && ruff format --check .
-mypy --config-file mypy.ini dem.py diarize.py pipeline.py
+mypy --config-file mypy.ini dem.py diarize.py pipeline.py server.py
 pytest                                              # unit tests, seconds
 pytest test/test_integration.py -v --integration    # real models, minutes
 ```
@@ -61,7 +56,7 @@ CI runs lint + unit tests on every push to `master`; integration tests run weekl
 
 ## Environment Variables
 
-- `HUGGING_FACE_TOKEN` / `HF_TOKEN`: Required for speaker diarization (pyannote.audio)
+- `HF_HUB_OFFLINE=1`: Never hit the network (same as `--offline`); models must be cached
 - `FORCE_CPU=1`: Skip GPU detection entirely
 
 ## Pull Request Process

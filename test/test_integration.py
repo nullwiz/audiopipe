@@ -75,19 +75,12 @@ def test_audio_separation(setup_test_env):
 
 
 @pytest.mark.integration
-@pytest.mark.requires_token
 def test_diarization(setup_test_env):
     """Test the speaker diarization step."""
     # First run separation if needed
     vocals_path = Path("output/combined_vocals.wav")
     if not vocals_path.exists():
         vocals_path = _run_audio_separation(setup_test_env)
-
-    # Print debug info
-    token = os.environ.get("HUGGING_FACE_TOKEN")
-    print(f"HUGGING_FACE_TOKEN is {'set' if token else 'NOT SET'}")
-    if token:
-        print(f"Token starts with: {token[:4]}...")
 
     # Run diarization with 2 speakers
     result = subprocess.run(
@@ -123,7 +116,6 @@ def test_diarization(setup_test_env):
 
 
 @pytest.mark.integration
-@pytest.mark.requires_token
 def test_transcription(setup_test_env):
     """Test the transcription step."""
     # Make sure previous steps are done
@@ -191,7 +183,6 @@ def test_transcription(setup_test_env):
 
 @pytest.mark.integration
 @pytest.mark.slow
-@pytest.mark.requires_token
 def test_full_pipeline(setup_test_env):
     """Test the entire pipeline from start to finish."""
     # Clean output directory

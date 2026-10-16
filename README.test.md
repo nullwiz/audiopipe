@@ -10,7 +10,7 @@ The project uses pytest and has two layers:
    - Pure logic: speaker mapping, segment consolidation, chunk merging, subprocess runner
    - Need only `pytest` and `pydub`; run by default
 2. **Integration Tests** (`test/test_integration.py`)
-   - Real Demucs / pyannote / Whisper runs on `test/data/`
+   - Real Demucs / Nemotron diarization / Nemotron ASR runs on `test/data/`
    - Need the full `requirements.txt`, ffmpeg, and `--integration`
 
 ## Running Tests
@@ -63,7 +63,6 @@ The test data in `test/data/` includes:
 
 Here are some common issues you might encounter with tests:
 
-- **Missing token**: If the `HUGGING_FACE_TOKEN` is not available, the diarization tests will be skipped
 - If ffmpeg is not installed, audio processing tests will fail
 - Set environment variables as needed: `export PYTORCH_ENABLE_MPS_FALLBACK=1`
 - The transcription step is the most resource-intensive and may fail on limited hardware; `FORCE_CPU=1` is set by CI
@@ -73,5 +72,5 @@ Here are some common issues you might encounter with tests:
 The project includes a GitHub Actions workflow for automated testing:
 
 - Lint, mypy, and unit tests run on every push and PR to `master`
-- Integration tests run weekly and via "Run workflow" (needs the `HUGGING_FACE_TOKEN` secret)
+- Integration tests run weekly and via "Run workflow"
 - See `.github/workflows/ci.yml`

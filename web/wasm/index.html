@@ -66,6 +66,26 @@
                     </div>
                 </div>
 
+                <div id="run-panel" class="run-panel">
+                    <div class="run-row">
+                        <button id="transcribe-btn" class="terminal-btn primary" disabled>
+                            <i class="fas fa-microphone-lines"></i>
+                            TRANSCRIBE AUDIO
+                        </button>
+                        <label>Speakers
+                            <select id="run-speakers" class="run-field">
+                                <option value="">auto</option>
+                                <option>1</option><option>2</option><option>3</option><option>4</option>
+                                <option>5</option><option>6</option><option>7</option><option>8</option>
+                            </select>
+                        </label>
+                        <label>Language
+                            <input id="run-language" class="run-field" placeholder="auto" size="6">
+                        </label>
+                        <label><input type="checkbox" id="run-separate" checked> remove music</label>
+                    </div>
+                    <div id="run-status" class="run-status">Looking for a local AudioPipe backend…</div>
+                </div>
                 <div class="terminal-controls-panel">
                     <div class="control-section">
                         <button id="load-file-btn" class="terminal-btn primary">
@@ -135,7 +155,7 @@
                         <div id="file-drop-zone" class="drop-zone">
                             <i class="fas fa-cloud-upload-alt"></i>
                             <p class="drop-zone-title">Load AudioPipe output</p>
-                            <p>GitHub Pages does not transcribe audio. Add a final_transcription.json file to view results.</p>
+                            <p>Drop a final_transcription.json here, or use TRANSCRIBE AUDIO when a local backend is running.</p>
                             <p>Optional: add the matching audio file for waveform playback.</p>
                         </div>
                     </div>
@@ -151,7 +171,7 @@
                             </div>
                             <div id="loading-message" class="loading-message">Processing file...</div>
                             <div class="loading-details">
-                                <div class="loading-tip">This viewer loads existing AudioPipe JSON transcripts, it does not create them.</div>
+                                <div class="loading-tip">Transcription runs on your own machine through the local AudioPipe backend.</div>
                                 <div class="loading-tip">Audio formats for playback: MP3, WAV, M4A, AAC, OGG (up to 500MB)</div>
                             </div>
                         </div>
@@ -241,6 +261,7 @@
 
     <input type="file" id="file-input" accept=".json" style="display: none;">
     <input type="file" id="audio-input" accept="audio/*" style="display: none;">
+    <input type="file" id="transcribe-input" accept="audio/*,video/*" style="display: none;">
     <script src="wasm_exec.js"></script>
     <script>
         let deferredPrompt;
@@ -394,6 +415,68 @@
             }
         }
 
+        // --- Local transcription backend (optional; the page stays a static viewer without it) ---
+        const params = new URLSearchParams(location.search);
+        const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+        const BACKEND = params.get('backend') || (isLocal ? location.origin : 'http://127.0.0.1:8737');
+        const runStatus = (html, cls = '') => {
+            const el = document.getElementById('run-status');
+            el.className = 'run-status ' + cls;
+            el.innerHTML = html;
+        };
+
+        async function probeBackend() {
+            const btn = document.getElementById('transcribe-btn');
+            try {
+                const r = await fetch(BACKEND + '/api/health', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
+                const h = await r.json();
+                btn.disabled = false;
+                runStatus(`Backend connected at ${BACKEND} · ${h.model}` + (h.busy ? ' · busy' : ''), 'ok');
+            } catch {
+                btn.disabled = true;
+                runStatus('No local backend found. To transcribe here, run <code>audiopipe-serve</code> and ' +
+                    '<a href="#" onclick="probeBackend();return false">retry</a>' +
+                    (isLocal ? '' : ', or open <a href="http://127.0.0.1:8737">http://127.0.0.1:8737</a> if your browser blocks it') + '.');
+            }
+        }
+
+        async function transcribe(file) {
+            const q = new URLSearchParams({
+                filename: file.name,
+                num_speakers: document.getElementById('run-speakers').value,
+                language: document.getElementById('run-language').value.trim(),
+                separate: document.getElementById('run-separate').checked ? '1' : '0',
+            });
+            const btn = document.getElementById('transcribe-btn');
+            btn.disabled = true;
+            const t0 = Date.now();
+            const tick = setInterval(() => runStatus(
+                `Transcribing ${file.name} on your machine… ${Math.round((Date.now() - t0) / 1000)}s`, 'busy'), 500);
+            try {
+                const r = await fetch(`${BACKEND}/api/transcribe?${q}`, {
+                    method: 'POST', body: file, headers: { 'Content-Type': 'application/octet-stream' },
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || r.statusText);
+                const base = file.name.replace(/\.[^.]+$/, '');
+                window.loadTranscriptionFile(new File([JSON.stringify(data, null, 2)], base + '.json', { type: 'application/json' }));
+                window.loadAudioFile(file);
+                runStatus(`Done in ${Math.round((Date.now() - t0) / 1000)}s · ${data.segments.length} segments`, 'ok');
+            } catch (e) {
+                runStatus('Transcription failed: ' + e.message, 'error');
+            } finally {
+                clearInterval(tick);
+                btn.disabled = false;
+            }
+        }
+
+        document.getElementById('transcribe-btn').addEventListener('click', () =>
+            document.getElementById('transcribe-input').click());
+        document.getElementById('transcribe-input').addEventListener('change', (e) => {
+            if (e.target.files.length) transcribe(e.target.files[0]);
+            e.target.value = '';
+        });
+        probeBackend();
         window.addEventListener('online', () => {
             if (window.showToast) {
                 window.showToast('Back online!', 'success');

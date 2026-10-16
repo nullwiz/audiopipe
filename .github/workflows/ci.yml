@@ -21,7 +21,7 @@ jobs:
       - run: pip install ruff mypy pydub
       - run: ruff check .
       - run: ruff format --check .
-      - run: mypy --config-file mypy.ini dem.py diarize.py pipeline.py
+      - run: mypy --config-file mypy.ini dem.py diarize.py pipeline.py server.py
 
   unit:
     name: Unit tests
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install pytest pydub
+      - run: pip install pytest pydub numpy
       - run: pytest test/test_unit.py -q
 
   integration:
@@ -45,7 +45,6 @@ jobs:
     env:
       FORCE_CPU: "1"
       AUDIOPIPE_TESTING: "1"
-      HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -54,7 +53,7 @@ jobs:
           cache: pip
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pip install -r requirements-dev.txt
-      - run: pytest test/test_integration.py -v --tb=short --integration
+      - run: pytest test/test_integration.py -v --tb=short --integration --runslow
       - uses: actions/upload-artifact@v4
         if: always()
         with:

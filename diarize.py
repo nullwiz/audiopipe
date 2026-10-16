@@ -3,287 +3,140 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from typing import Any
 
-
-PIPELINE = "pyannote/speaker-diarization-3.1"
-
-
-def get_hf_token() -> str | None:
-    """Token from HUGGING_FACE_TOKEN, falling back to the standard HF_TOKEN."""
-    return os.environ.get("HUGGING_FACE_TOKEN") or os.environ.get("HF_TOKEN") or None
+import numpy as np
 
 
-def load_pipeline(token: str | None) -> Any:
-    """Load the pyannote pipeline, tolerating the 3.x → 4.x auth kwarg rename."""
-    from pyannote.audio import Pipeline
-
-    try:
-        return Pipeline.from_pretrained(PIPELINE, token=token)
-    except TypeError:
-        return Pipeline.from_pretrained(PIPELINE, use_auth_token=token)
+MODEL = "nvidia/Nemotron-3-Diarization"
+SAMPLE_RATE = 16000
+FRAME_SEC = 0.01  # the model emits one logit row per 10 ms
+MAX_SPEAKERS = 8
 
 
-def merge_continuous_fragments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Merge adjacent segments from the same speaker with small gaps."""
-    if not segments:
-        return segments
-
-    # Group segments by speaker
-    segments_by_speaker: dict[str, list[dict[str, Any]]] = {}
-    for segment in segments:
-        speaker = segment["speaker"]
-        if speaker not in segments_by_speaker:
-            segments_by_speaker[speaker] = []
-        segments_by_speaker[speaker].append(segment)
-
-    # Sort each speaker's segments by start time
-    for speaker in segments_by_speaker:
-        segments_by_speaker[speaker].sort(key=lambda x: x["start"])
-
-    merged_segments: list[dict[str, Any]] = []
-
-    for _speaker, speaker_segments in segments_by_speaker.items():
-        if not speaker_segments:
-            continue
-
-        current_segment = speaker_segments[0].copy()
-
-        for next_segment in speaker_segments[1:]:
-            gap = next_segment["start"] - current_segment["end"]
-
-            if gap <= 2.0:  # Merge segments with gaps ≤2 seconds
-                current_segment["end"] = next_segment["end"]
-            else:
-                merged_segments.append(current_segment)
-                current_segment = next_segment.copy()
-
-        merged_segments.append(current_segment)
-
-    merged_segments.sort(key=lambda x: x["start"])
-    return merged_segments
-
-
-def speaker_kwargs(
-    num_speakers: int | None, min_speakers: int | None, max_speakers: int | None
-) -> dict[str, int]:
-    """Only pass the constraints the caller actually gave; pyannote handles the rest."""
-    if num_speakers is not None:
-        return {"num_speakers": num_speakers}
-    kwargs: dict[str, int] = {}
-    if min_speakers is not None:
-        kwargs["min_speakers"] = min_speakers
-    if max_speakers is not None:
-        kwargs["max_speakers"] = max_speakers
-    return kwargs
-
-
-def diarize_audio(
-    audio_path: str,
+def probs_to_segments(
+    probs: np.ndarray,
     num_speakers: int | None = None,
-    min_speakers: int | None = None,
-    max_speakers: int | None = None,
+    threshold: float = 0.5,
+    min_dur: float = 0.25,
+    max_gap: float = 1.0,
+    max_len: float = 30.0,
 ) -> list[dict[str, Any]]:
-    """Standard pyannote 3.1 speaker diarization.
+    """Turn (frames, speakers) activity probabilities into non-overlapping segments.
 
-    Args:
-        audio_path: Path to audio file
-        num_speakers: Exact number of speakers if known
-        min_speakers: Minimum number of speakers
-        max_speakers: Maximum number of speakers
-
-    Returns:
-        List of segments with speaker IDs and timestamps
+    Each speech frame goes to its single most likely speaker (overlaps are
+    resolved, so audio is never transcribed twice). Speaker channels are in
+    order of first arrival, so num_speakers keeps the first N. Blips shorter
+    than min_dur are dropped, same-speaker neighbours within max_gap merge, and
+    nothing exceeds max_len: over-long speech is split at its least confident
+    frame so ASR models with a context cap (and Whisper's 30 s window) cope.
     """
-    import torch
-
-    token = get_hf_token()
-    if not token:
-        print(
-            "⚠️ HUGGING_FACE_TOKEN / HF_TOKEN not set; pyannote model download "
-            "will likely fail. Get a token at https://hf.co/settings/tokens",
-            file=sys.stderr,
-        )
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🎙️ Starting pyannote diarization on {device}...")
-
-    try:
-        pipeline = load_pipeline(token)
-        pipeline.to(device)
-
-        # Enable TF32 for better performance
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-
-        kwargs = speaker_kwargs(num_speakers, min_speakers, max_speakers)
-        print(f"🎯 Speaker constraints: {kwargs or 'auto'}")
-
-        print("🎙️ Running pyannote diarization (this may take a few minutes)...")
-        diarization = pipeline(audio_path, **kwargs)
-
-        print("🎙️ Extracting segments from diarization output...")
-        segments = []
-
-        for turn, _, speaker in diarization.itertracks(yield_label=True):
-            duration = turn.end - turn.start
-
-            if duration >= 0.05:  # Filter out very short artifacts
-                segments.append(
-                    {
-                        "speaker": speaker,
-                        "start": round(turn.start, 3),
-                        "end": round(turn.end, 3),
-                    }
-                )
-
-        print(f"🎙️ Extracted {len(segments)} raw segments from pyannote")
-
-        segments.sort(key=lambda x: x["start"])
-
-        unique_speakers = len({seg["speaker"] for seg in segments})
-        print(f"🎯 Detected {unique_speakers} unique speakers in raw output")
-
-        return segments
-    except Exception as e:
-        print(f"Error in diarize_audio: {e!s}", file=sys.stderr)
-        print(f"Python {sys.version}; torch {torch.__version__}", file=sys.stderr)
-        print(f"Device: {device}; audio: {audio_path}", file=sys.stderr)
-        raise
-
-
-def combine_diarization_with_transcription(
-    diarization_segments: list[dict[str, Any]],
-    transcription_chunks: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Combine diarization results with transcription chunks to create
-    a final output with both speaker IDs and transcribed text.
-    """
-    combined_output = []
-
-    for chunk in transcription_chunks:
-        chunk_start, chunk_end = chunk["timestamp"]
-        speakers_in_chunk = set()
-
-        # Find all speakers active during this chunk
-        for segment in diarization_segments:
-            if segment["start"] <= chunk_end and segment["end"] >= chunk_start:
-                speakers_in_chunk.add(segment["speaker"])
-
-        combined_output.append(
-            {
-                "timestamp": [chunk_start, chunk_end],
-                "text": chunk["text"],
-                "speakers": sorted(speakers_in_chunk),
-            }
-        )
-
-    return combined_output
-
-
-def apply_post_processing(
-    raw_segments: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Apply conservative merging to raw diarization segments."""
-    print("🔧 Applying post-processing to raw diarization output...")
-
-    merged_segments = merge_continuous_fragments(raw_segments)
-
-    fragment_reduction = len(raw_segments) - len(merged_segments)
-    if fragment_reduction > 0:
-        print(f"🔧 Merged {fragment_reduction} fragmented segments")
-    else:
-        print("🔧 No fragmentation detected - segments already optimal")
-
-    final_speakers = sorted({seg["speaker"] for seg in merged_segments})
-    print(
-        f"🎯 Final speaker count after post-processing: {len(final_speakers)} speakers"
-    )
-
-    return merged_segments
-
-
-def process_audio_with_diarization(
-    audio_path: str,
-    transcription_output_path: str | None = None,
-    num_speakers: int | None = None,
-    min_speakers: int | None = None,
-    max_speakers: int | None = None,
-) -> str:
-    """Main function to process audio with diarization and optional post-processing."""
+    if len(probs) == 0:
+        return []
+    speech = probs.max(axis=1) > threshold  # before trimming: late speakers still count
     if num_speakers:
-        print(f"👥 Using exact number of speakers: {num_speakers}")
-    elif min_speakers or max_speakers:
-        print(f"👥 Speaker bounds: {min_speakers or 'auto'} - {max_speakers or 'auto'}")
+        probs = probs[:, :num_speakers]
+    confidence = probs.max(axis=1)
+    owner = np.where(speech, probs.argmax(axis=1), -1)
 
-    # Get raw diarization segments
-    raw_segments = diarize_audio(audio_path, num_speakers, min_speakers, max_speakers)
+    # run-length encode owner → [speaker, start_frame, end_frame)
+    edges = np.flatnonzero(np.diff(owner)) + 1
+    starts = np.concatenate([[0], edges])
+    ends = np.concatenate([edges, [len(owner)]])
+    runs = [
+        [int(owner[s]), int(s), int(e)]
+        for s, e in zip(starts, ends, strict=True)
+        if owner[s] >= 0 and (e - s) * FRAME_SEC >= min_dur
+    ]
 
-    # Apply post-processing
-    processed_segments = apply_post_processing(raw_segments)
+    max_frames = round(max_len / FRAME_SEC)
+    gap_frames = round(max_gap / FRAME_SEC)
+    merged: list[list[int]] = []
+    for spk, s, e in runs:
+        prev = merged[-1] if merged else None
+        if (
+            prev
+            and prev[0] == spk
+            and s - prev[2] <= gap_frames
+            and e - prev[1] <= max_frames
+        ):
+            prev[2] = e
+        else:
+            merged.append([spk, s, e])
 
-    # Create output data
-    output_data = {
-        "speakers": sorted({seg["speaker"] for seg in processed_segments}),
-        "segments": processed_segments,
+    out: list[dict[str, Any]] = []
+    for spk, s, e in merged:
+        while e - s > max_frames:
+            # cut at the least confident frame in the last third of the window
+            lo = s + max_frames * 2 // 3
+            cut = lo + int(confidence[lo : s + max_frames].argmin())
+            out.append(_segment(spk, s, cut))
+            s = cut
+        out.append(_segment(spk, s, e))
+    return out
+
+
+def _segment(spk: int, start: int, end: int) -> dict[str, Any]:
+    return {
+        "speaker": f"SPEAKER_{spk:02d}",
+        "start": round(start * FRAME_SEC, 2),
+        "end": round(end * FRAME_SEC, 2),
     }
 
-    # If transcription file exists, combine them
-    if transcription_output_path and os.path.exists(transcription_output_path):
-        with open(transcription_output_path) as f:
-            transcription_data = json.load(f)
 
-        combined_output = combine_diarization_with_transcription(
-            processed_segments, transcription_data["chunks"]
-        )
-        output_data["chunks"] = combined_output
+def load_audio(path: str) -> np.ndarray:
+    """Mono float32 at 16 kHz (librosa decodes via soundfile/ffmpeg)."""
+    import librosa
 
-    # Generate output path
-    base_path = os.path.splitext(audio_path)[0]
-    output_path = f"{base_path}_diarized.json"
+    audio, _ = librosa.load(path, sr=SAMPLE_RATE, mono=True)
+    return audio
 
-    # Save output
-    with open(output_path, "w") as f:
-        json.dump(output_data, f, indent=2)
 
-    return output_path
+def speaker_probs(audio: np.ndarray, device: str, model: str = MODEL) -> np.ndarray:
+    """Run Nemotron 3 Diarization offline; returns (frames, 8) probabilities."""
+    import torch
+    from transformers import AutoModelForAudioFrameClassification, AutoProcessor
+
+    processor = AutoProcessor.from_pretrained(model)
+    net = AutoModelForAudioFrameClassification.from_pretrained(model).to(device)
+    net.eval()
+    inputs = processor(audio, sampling_rate=SAMPLE_RATE).to(device, dtype=net.dtype)
+    with torch.inference_mode():  # offline mode chunks internally: any length works
+        logits = net(**inputs).logits[0]
+    return torch.sigmoid(logits).float().cpu().numpy()
+
+
+def diarize(
+    audio_path: str,
+    num_speakers: int | None = None,
+    device: str = "cpu",
+    model: str = MODEL,
+) -> dict[str, Any]:
+    print(f"🎙️ Running {model} on {device}...")
+    probs = speaker_probs(load_audio(audio_path), device, model)
+    segments = probs_to_segments(probs, num_speakers)
+    speakers = sorted({s["speaker"] for s in segments})
+    print(f"🎯 {len(speakers)} speakers, {len(segments)} segments")
+    return {"speakers": speakers, "segments": segments}
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Local speaker diarization")
     parser.add_argument("audio_path", help="Path to the audio file")
-    parser.add_argument(
-        "--transcription",
-        "-t",
-        help="Optional: Path to transcription JSON file",
-        default=None,
-    )
     parser.add_argument(
         "--num-speakers",
         "-n",
         type=int,
-        help="Exact number of speakers",
-        default=None,
+        choices=range(1, MAX_SPEAKERS + 1),
+        metavar=f"1-{MAX_SPEAKERS}",
+        help="Number of speakers, if known",
     )
-    parser.add_argument(
-        "--min-speakers",
-        type=int,
-        help="Minimum number of speakers",
-        default=None,
-    )
-    parser.add_argument(
-        "--max-speakers",
-        type=int,
-        help="Maximum number of speakers",
-        default=None,
-    )
+    parser.add_argument("--device", "-d", default="cpu", help="cpu, cuda or mps")
+    parser.add_argument("--model", default=MODEL, help="Model id or local path")
     args = parser.parse_args()
 
-    output_path = process_audio_with_diarization(
-        args.audio_path,
-        args.transcription,
-        args.num_speakers,
-        args.min_speakers,
-        args.max_speakers,
-    )
-    print(f"✅ Processed output saved to: {output_path}")
+    result = diarize(args.audio_path, args.num_speakers, args.device, args.model)
+    output_path = f"{os.path.splitext(args.audio_path)[0]}_diarized.json"
+    with open(output_path, "w") as f:
+        json.dump(result, f, indent=2)
+    print(f"✅ Saved: {output_path}")
