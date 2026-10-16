@@ -1,9 +1,9 @@
 // AudioPipe WASM Service Worker
 // Provides offline functionality and caching for PWA
 
-const CACHE_NAME = 'audiopipe-wasm-v1.0.0';
-const STATIC_CACHE_NAME = 'audiopipe-static-v1.0.0';
-const DYNAMIC_CACHE_NAME = 'audiopipe-dynamic-v1.0.0';
+const CACHE_NAME = 'audiopipe-wasm-v1.1.1';
+const STATIC_CACHE_NAME = 'audiopipe-static-v1.1.1';
+const DYNAMIC_CACHE_NAME = 'audiopipe-dynamic-v1.1.1';
 
 // Files to cache for offline use
 const STATIC_FILES = [
@@ -25,7 +25,8 @@ self.addEventListener('install', (event) => {
     caches.open(STATIC_CACHE_NAME)
       .then((cache) => {
         console.log('[SW] Caching static files');
-        return cache.addAll(STATIC_FILES);
+        // 'reload' bypasses the HTTP cache so a new version never caches stale files
+        return cache.addAll(STATIC_FILES.map((url) => new Request(url, { cache: 'reload' })));
       })
       .then(() => {
         console.log('[SW] Static files cached successfully');
@@ -66,14 +67,15 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
   
-  // Skip non-GET requests
-  if (request.method !== 'GET') {
+  // Skip non-GET requests and the local backend API (must never be cached)
+  if (request.method !== 'GET' || url.pathname.startsWith('/api/')) {
     return;
   }
   
   // Handle different types of requests
-  if (isStaticFile(request.url)) {
-    // Static files: Cache first, network fallback
+  if (isStaticFile(request.url) && url.origin !== self.location.origin) {
+    // Pinned CDN files: Cache first, network fallback. Own files go network
+    // first so a new deploy shows up on the next load; cache is the offline fallback
     event.respondWith(cacheFirst(request));
   } else if (isExternalResource(request.url)) {
     // External resources: Network first, cache fallback
